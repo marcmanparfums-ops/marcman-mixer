@@ -1,0 +1,60 @@
+name: Build Marcman Mixer Windows Executable
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+      - name: Run jpackage
+        run: |
+          pwd
+          echo "saving version ${{ github.ref_name }}"
+          echo ${{ github.ref_name }} > adapters\ui\src\main\resources\version.properties
+          mkdir input-jars
+          call mvnw.cmd clean install -ntp -DskipTests
+          echo "copying third party dependencies"
+          call mvnw.cmd dependency:copy-dependencies -DoutputDirectory=input-jars -ntp
+          for /r %%F in (*.jar) do copy "%%F" input-jars
+          echo "copied jars to input-jars"
+          dir input-jars
+          echo "dependencies copied, listing mods"
+          dir jmods\javafx-jmods-25
+          echo "running jlink"
+          jlink --module-path "jmods\javafx-jmods-25;%JAVA_HOME%\jmods" --add-modules java.base,java.sql,java.desktop,javafx.base,javafx.controls,javafx.fxml,javafx.graphics --output runtime
+          echo "running jpackage"
+          jpackage --type exe --input input-jars --main-jar app-1.0.0-SNAPSHOT.jar --main-class ro.marcman.mixer.app.App --name "MarcmanMixer" --icon mixer.ico --app-version ${{ github.ref_name }} --java-options "--enable-preview" --runtime-image runtime --description "Marcman Oil Mixer" --win-menu --win-shortcut --win-dir-chooser --dest .
+          for /r %%F in (*.exe) do echo "%%F"
+        shell: cmd
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Executable to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./MarcmanMixer-${{ github.ref_name }}.exe
+          asset_name: MarcmanMixer-${{ github.ref_name }}.exe
+          asset_content_type: application/octet-stream
