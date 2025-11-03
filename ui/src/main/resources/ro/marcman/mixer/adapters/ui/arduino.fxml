@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="ro.marcman.mixer.adapters.ui.controller.ArduinoController"
+      spacing="10" style="-fx-padding: 15;">
+    
+    <Label text="Arduino MASTER Communication" style="-fx-font-size: 18px; -fx-font-weight: bold;"/>
+    
+    <!-- Connection Panel -->
+    <TitledPane text="Connection" expanded="true" collapsible="false">
+        <VBox spacing="10">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="COM Port:" minWidth="80"/>
+                <ComboBox fx:id="portComboBox" promptText="Select port or use auto-detect" 
+                          HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                <Button fx:id="refreshButton" text="Refresh" onAction="#handleRefresh"/>
+            </HBox>
+            
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Button fx:id="connectButton" text="Connect" onAction="#handleConnect" 
+                        style="-fx-background-color: #4CAF50; -fx-text-fill: white;"/>
+                <Button fx:id="disconnectButton" text="Disconnect" onAction="#handleDisconnect"
+                        style="-fx-background-color: #f44336; -fx-text-fill: white;"/>
+                <Separator orientation="VERTICAL"/>
+                <Button fx:id="discoverButton" text="Discover Slaves" onAction="#handleDiscover"/>
+                <Button fx:id="scanButton" text="Scan Network" onAction="#handleScan"/>
+            </HBox>
+            
+            <Label fx:id="statusLabel" text="Not connected" 
+                   style="-fx-font-weight: bold; -fx-padding: 5;"/>
+        </VBox>
+    </TitledPane>
+    
+    <!-- Command Panel -->
+    <TitledPane text="Command Console" expanded="true" collapsible="false" VBox.vgrow="ALWAYS">
+        <VBox spacing="10" VBox.vgrow="ALWAYS">
+            <TextArea fx:id="responseArea" editable="false" wrapText="true"
+                      VBox.vgrow="ALWAYS" style="-fx-font-family: 'Courier New'; -fx-font-size: 12px;"/>
+            
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <TextField fx:id="commandField" promptText="Enter command (e.g., help, scan, ping_uid 0x12345678)"
+                          HBox.hgrow="ALWAYS" onAction="#handleSend"/>
+                <Button fx:id="sendButton" text="Send" onAction="#handleSend"
+                        style="-fx-background-color: #2196F3; -fx-text-fill: white;"/>
+            </HBox>
+            
+            <Label text="Quick Commands:" style="-fx-font-weight: bold;"/>
+            <TilePane hgap="5" vgap="5">
+                <Button text="help" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+                <Button text="ver" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+                <Button text="discover" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+                <Button text="scan" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+                <Button text="table" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+                <Button text="summary" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+                <Button text="eemap" onAction="#handleCommand" style="-fx-font-size: 10px;"/>
+            </TilePane>
+        </VBox>
+    </TitledPane>
+</VBox>
+
+

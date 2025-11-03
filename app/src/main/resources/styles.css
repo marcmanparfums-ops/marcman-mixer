@@ -1,0 +1,96 @@
+/* MarcmanMixer Styles */
+
+.root {
+    -fx-font-family: "Segoe UI", Arial, sans-serif;
+    -fx-font-size: 14px;
+    -fx-background-color: #f5f5f5;
+}
+
+/* Status Labels */
+.status-success {
+    -fx-text-fill: #4CAF50;
+    -fx-background-color: #E8F5E9;
+    -fx-padding: 5px 10px;
+    -fx-border-radius: 3px;
+    -fx-background-radius: 3px;
+}
+
+.status-error {
+    -fx-text-fill: #f44336;
+    -fx-background-color: #FFEBEE;
+    -fx-padding: 5px 10px;
+    -fx-border-radius: 3px;
+    -fx-background-radius: 3px;
+}
+
+.status-warning {
+    -fx-text-fill: #FF9800;
+    -fx-background-color: #FFF3E0;
+    -fx-padding: 5px 10px;
+    -fx-border-radius: 3px;
+    -fx-background-radius: 3px;
+}
+
+.status-info {
+    -fx-text-fill: #2196F3;
+    -fx-background-color: #E3F2FD;
+    -fx-padding: 5px 10px;
+    -fx-border-radius: 3px;
+    -fx-background-radius: 3px;
+}
+
+/* Buttons */
+.button {
+    -fx-background-radius: 3px;
+    -fx-padding: 8px 16px;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-opacity: 0.9;
+}
+
+/* Text Area (Console) */
+.text-area {
+    -fx-background-color: #263238;
+    -fx-text-fill: #00FF00;
+}
+
+.text-area .content {
+    -fx-background-color: #263238;
+}
+
+/* TitledPane */
+.titled-pane > .title {
+    -fx-background-color: #3F51B5;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.titled-pane > *.content {
+    -fx-background-color: white;
+    -fx-border-color: #E0E0E0;
+}
+
+/* TabPane */
+.tab-pane {
+    -fx-background-color: white;
+}
+
+.tab {
+    -fx-background-color: #E0E0E0;
+}
+
+.tab:selected {
+    -fx-background-color: #3F51B5;
+}
+
+.tab:selected .tab-label {
+    -fx-text-fill: white;
+}
+
+.tab .tab-label {
+    -fx-font-weight: bold;
+}
+
+

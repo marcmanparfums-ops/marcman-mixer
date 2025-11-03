@@ -1,0 +1,59 @@
+==========================================
+  CUM SA CREEZI ICONITA - 3 METODE
+==========================================
+
+METODA 1: ONLINE (CEL MAI SIMPLU)
+----------------------------------
+1. Mergi pe: https://www.canva.com/create/icons/
+   sau: https://www.flaticon.com/
+   
+2. Cauta: "perfume bottle", "lab equipment", "M letter"
+
+3. Descarca ca PNG (256x256 sau 512x512)
+
+4. Redenumeste in "icon.png"
+
+5. Copiaza in: app/src/main/resources/images/icon.png
+
+
+METODA 2: TEXT EMOJI (SIMPLU)
+------------------------------
+Poti folosi un emoji ca iconita temporara:
+🧪 - lab beaker
+💧 - droplet  
+🌸 - flower
+🔬 - microscope
+🧴 - bottle
+
+Salvezi un screenshot al emoji-ului ca icon.png
+
+
+METODA 3: GENERARE AI (PROFESIONAL)
+------------------------------------
+Foloseste ChatGPT/DALL-E:
+"Create a simple, modern icon for a perfume mixer application.
+ 256x256 pixels, transparent background, minimalist style.
+ Use lab equipment or perfume bottle theme."
+
+
+RECOMANDARI:
+------------
+✓ Dimensiune: 256x256 px (sau 512x512)
+✓ Format: PNG cu transparenta
+✓ Stil: Simplu, clar, recognizable
+✓ Culori: Pastels sau brand colors
+✓ Tema: Lab/Science/Perfume
+
+==========================================
+
+
+
+
+
+
+
+
+
+
+
+
