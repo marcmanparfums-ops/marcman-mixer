@@ -20,8 +20,6 @@ jobs:
       - name: Run jpackage
         run: |
           pwd
-          echo "saving version ${{ github.ref_name }}"
-          echo ${{ github.ref_name }} > adapters\ui\src\main\resources\version.properties
           mkdir input-jars
           call mvnw.cmd clean install -ntp -DskipTests
           echo "copying third party dependencies"
@@ -34,7 +32,7 @@ jobs:
           echo "running jlink"
           jlink --module-path "jmods\javafx-jmods-25;%JAVA_HOME%\jmods" --add-modules java.base,java.sql,java.desktop,javafx.base,javafx.controls,javafx.fxml,javafx.graphics --output runtime
           echo "running jpackage"
-          jpackage --type exe --input input-jars --main-jar app-1.0.0-SNAPSHOT.jar --main-class ro.marcman.mixer.app --name "MarcmanMixer" --app-version ${{ github.ref_name }} --java-options "--enable-preview" --runtime-image runtime --description "Marcman Oil Mixer" --win-menu --win-shortcut --win-dir-chooser --dest .
+          jpackage --type exe --input input-jars --main-jar app-1.0.0-SNAPSHOT.jar --main-class ro.marcman.mixer.app --name "MarcmanMixer" --icon mixer.ico --app-version ${{ github.ref_name }} --java-options "--enable-preview" --runtime-image runtime --description "Marcman Oil Mixer" --win-menu --win-shortcut --win-dir-chooser --dest .
           for /r %%F in (*.exe) do echo "%%F"
         shell: cmd
 
