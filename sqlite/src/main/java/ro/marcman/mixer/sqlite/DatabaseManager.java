@@ -30,83 +30,38 @@ public class DatabaseManager {
     private Connection connection;
     
     /**
-     * Find the correct database path regardless of how the application is launched
+     * Find the correct database path.
+     * Database is stored in user's Local AppData directory: %LOCALAPPDATA%\MarcmanMixer\marcman_mixer.db
      */
     private static String findDatabasePath() {
-        String userDir = System.getProperty("user.dir");
-        File currentDir = new File(userDir);
+        // Get Local AppData directory (Windows: C:\Users\Username\AppData\Local)
+        String localAppData = System.getenv("LOCALAPPDATA");
         
-        // Priority 1: Check if we're in MarcmanMixer_Portable directory (portable package)
-        // This is the most common case when running from portable package
-        if (currentDir.getName().equals("MarcmanMixer_Portable")) {
-            File dbInPortable = new File(currentDir, "app" + File.separator + "marcman_mixer.db");
-            if (dbInPortable.exists()) {
-                return dbInPortable.getAbsolutePath();
-            }
-            // If not found but we're in portable package, create it here
-            return dbInPortable.getAbsolutePath();
-        }
-        
-        // Priority 2: Check if we're in app directory
-        if (currentDir.getName().equals("app")) {
-            File dbInApp = new File(currentDir, "marcman_mixer.db");
-            if (dbInApp.exists()) {
-                return dbInApp.getAbsolutePath();
-            }
-            // Create in app directory
-            return dbInApp.getAbsolutePath();
-        }
-        
-        // Priority 3: Check if app/marcman_mixer.db exists at current level
-        File dbFileCurrent = new File(currentDir, "app" + File.separator + "marcman_mixer.db");
-        if (dbFileCurrent.exists()) {
-            return dbFileCurrent.getAbsolutePath();
-        }
-        
-        // Priority 4: Try to find database by going up the directory tree
-        // This handles: root, app/, dist/, or any subdirectory
-        File searchDir = currentDir;
-        int maxLevels = 5; // Limit search depth
-        int level = 0;
-        
-        while (searchDir != null && level < maxLevels) {
-            // Check if app/marcman_mixer.db exists at this level
-            File dbFileSearch = new File(searchDir, "app" + File.separator + "marcman_mixer.db");
-            if (dbFileSearch.exists()) {
-                return dbFileSearch.getAbsolutePath();
-            }
-            
-            // Check if we're in MarcmanMixer_Portable directory
-            if (searchDir.getName().equals("MarcmanMixer_Portable")) {
-                File dbInPortableUp = new File(searchDir, "app" + File.separator + "marcman_mixer.db");
-                return dbInPortableUp.getAbsolutePath();
-            }
-            
-            // Go up one level
-            searchDir = searchDir.getParentFile();
-            level++;
-        }
-        
-        // Fallback: try standard locations
-        // If we're running from the app directory (Maven javafx:run scenario)
-        if (currentDir.getName().equals("app")) {
-            File parentDir = currentDir.getParentFile();
-            if (parentDir != null) {
-                return parentDir.getAbsolutePath() + File.separator + "app" + File.separator + "marcman_mixer.db";
+        // Fallback for non-Windows or if LOCALAPPDATA is not set
+        if (localAppData == null || localAppData.isEmpty()) {
+            String userHome = System.getProperty("user.home");
+            if (userHome != null) {
+                // Try to construct the path manually
+                String os = System.getProperty("os.name", "").toLowerCase();
+                if (os.contains("win")) {
+                    // Windows: user.home\AppData\Local
+                    localAppData = userHome + File.separator + "AppData" + File.separator + "Local";
+                } else {
+                    // Unix-like: user.home/.local/share or user.home/.config
+                    localAppData = userHome + File.separator + ".local" + File.separator + "share";
+                }
+            } else {
+                // Last resort: use current directory
+                localAppData = System.getProperty("user.dir");
             }
         }
         
-        // If we're in dist directory (executable scenario)
-        if (currentDir.getName().equals("dist")) {
-            File parentDir = currentDir.getParentFile();
-            if (parentDir != null) {
-                File dbFile = new File(parentDir, "app" + File.separator + "marcman_mixer.db");
-                return dbFile.getAbsolutePath();
-            }
-        }
+        // Create MarcmanMixer directory path
+        File dbDir = new File(localAppData, "MarcmanMixer");
+        File dbFile = new File(dbDir, "marcman_mixer.db");
         
-        // Normal case: running from root directory
-        return currentDir.getAbsolutePath() + File.separator + "app" + File.separator + "marcman_mixer.db";
+        log.info("Database path: {}", dbFile.getAbsolutePath());
+        return dbFile.getAbsolutePath();
     }
     
     /**
@@ -128,6 +83,14 @@ public class DatabaseManager {
             }
         }
         return instance;
+    }
+    
+    /**
+     * Get the database file path
+     * @return Absolute path to the database file
+     */
+    public String getDatabasePath() {
+        return DB_PATH;
     }
     
     /**

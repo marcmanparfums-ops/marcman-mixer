@@ -159,10 +159,12 @@ app
 
 ### Database Location
 
-The application automatically detects the database location:
-- First run: Creates `app/marcman_mixer.db`
-- Portable mode: Uses database in application directory
-- Standard mode: Uses database in user's home directory
+The application stores the database in the user's Local AppData directory:
+- **Windows**: `%LOCALAPPDATA%\MarcmanMixer\marcman_mixer.db`
+  - Example: `C:\Users\YourUsername\AppData\Local\MarcmanMixer\marcman_mixer.db`
+- **Linux/Mac**: `~/.local/share/MarcmanMixer/marcman_mixer.db`
+
+The database directory and file are automatically created on first run if they don't exist.
 
 ### Arduino Communication
 
@@ -244,4 +246,6 @@ For questions or support, please open an issue on GitHub.
 ---
 
 **Made with ❤️ for perfume enthusiasts and professionals**
+
+
 

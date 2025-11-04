@@ -40,3 +40,5 @@ Aplicatia va rula normal chiar daca iconita nu este prezenta.
 
 
 
+
+

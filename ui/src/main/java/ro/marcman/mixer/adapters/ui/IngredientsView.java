@@ -355,8 +355,9 @@ public class IngredientsView extends VBox {
             showError("Error loading ingredients", e.getMessage());
             
             // Show placeholder with error
+            String dbPath = DatabaseManager.getInstance().getDatabasePath();
             Label errorLabel = new Label("⚠️ Error loading ingredients from database:\n" + e.getMessage() +
-                "\n\nDatabase should be at: marcman_mixer.db\n" +
+                "\n\nDatabase location: " + dbPath + "\n" +
                 "Try running: data\\import_ifra_full.bat");
             errorLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: red;");
             getChildren().add(errorLabel);
@@ -1389,22 +1390,13 @@ public class IngredientsView extends VBox {
                         int deletedCount = 0;
                         int recipeIngredientsDeleted = 0;
                         
-                        // Use singleton DatabaseManager to get correct path
-                        String userDir = System.getProperty("user.dir");
-                        String dbPath;
-                        if (userDir.endsWith(File.separator + "app") || userDir.endsWith("\\app")) {
-                            // Maven launch scenario
-                            File parentDir = new File(userDir).getParentFile();
-                            dbPath = parentDir.getAbsolutePath() + File.separator + "app" + File.separator + "marcman_mixer.db";
-                        } else {
-                            // Normal launch
-                            dbPath = userDir + File.separator + "app" + File.separator + "marcman_mixer.db";
-                        }
+                        // Use singleton DatabaseManager to get connection
+                        DatabaseManager dbMgr = DatabaseManager.getInstance();
                         
                         // Delete each ingredient without pins
                         for (Ingredient ing : noPins) {
                             try {
-                                java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+                                java.sql.Connection conn = dbMgr.getConnection();
                                 
                                 // Delete recipe-ingredient links first
                                 java.sql.PreparedStatement stmt = conn.prepareStatement(
@@ -1490,17 +1482,9 @@ public class IngredientsView extends VBox {
                     System.out.println("Clearing all ingredients from database...");
                     
                     // Execute SQL to clear all data using correct path
-                    String userDir = System.getProperty("user.dir");
-                    String dbPath;
-                    if (userDir.endsWith(File.separator + "app") || userDir.endsWith("\\app")) {
-                        // Maven launch scenario
-                        File parentDir = new File(userDir).getParentFile();
-                        dbPath = parentDir.getAbsolutePath() + File.separator + "app" + File.separator + "marcman_mixer.db";
-                    } else {
-                        // Normal launch
-                        dbPath = userDir + File.separator + "app" + File.separator + "marcman_mixer.db";
-                    }
-                    java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+                    // Use singleton DatabaseManager to get connection
+                    DatabaseManager dbMgr = DatabaseManager.getInstance();
+                    java.sql.Connection conn = dbMgr.getConnection();
                     java.sql.Statement stmt = conn.createStatement();
                     
                     // Delete in correct order (respect foreign keys)

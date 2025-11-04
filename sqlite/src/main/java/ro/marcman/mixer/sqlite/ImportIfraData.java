@@ -29,7 +29,7 @@ public class ImportIfraData {
             System.out.println("SUCCESS! Imported " + imported + " ingredients from IFRA Transparency List");
             System.out.println("============================================================");
             System.out.println();
-            System.out.println("Database file: marcman_mixer.db");
+            System.out.println("Database file: " + dbManager.getDatabasePath());
             System.out.println();
             
             dbManager.close();
