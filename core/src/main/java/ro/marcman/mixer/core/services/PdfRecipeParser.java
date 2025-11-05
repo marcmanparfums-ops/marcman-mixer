@@ -160,6 +160,7 @@ public class PdfRecipeParser {
         List<PdfIngredient> ingredients = new ArrayList<>();
         String[] lines = pdfText.split("\\r?\\n");
         
+        // Parse each line
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i].trim();
             

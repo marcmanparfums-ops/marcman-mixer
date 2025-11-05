@@ -58,4 +58,8 @@ desktop.ini
 *.swp
 *~
 
+# Analysis and documentation files
+PDF_ANALYSIS_RESULT.md
+PDF_IMPORT_REQUIREMENTS.md
+
 
