@@ -1,6 +1,5 @@
 # Procedura build executabil:
 
-
 - din meniul de start aleg "git bash"
 - cd Documents/MarcmanMixer # navighez in directorul proiectului
 - git add . # adaug ultimele modificari la cod
