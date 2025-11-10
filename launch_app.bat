@@ -27,7 +27,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 REM Set Java and Maven
-set "JAVA_HOME=C:\Java\jdk-21.0.5+11"
+set "JAVA_HOME=C:\Program Files\Zulu\zulu-25"
 set "MAVEN_HOME=C:\Maven\apache-maven-3.9.6"
 
 REM Verify Java exists

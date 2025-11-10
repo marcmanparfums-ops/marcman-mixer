@@ -1,10 +1,14 @@
 package ro.marcman.mixer.adapters.ui;
 
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.*;
 import ro.marcman.mixer.core.model.Ingredient;
@@ -18,6 +22,7 @@ import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import javafx.util.Callback;
 
 /**
  * Mix Control UI - Execute recipes automatically
@@ -43,6 +48,8 @@ public class MixControlView extends VBox {
     private Label stockWarningLabel;
     private Label stockStatusLabel;
     private VBox stockInfoPanel;
+    
+    private final Map<RecipeIngredient, BooleanProperty> ingredientSelectionMap = new IdentityHashMap<>();
     
     private boolean executing = false;
     private static final int MAX_BATCH_SIZE = 64;
@@ -180,6 +187,25 @@ public class MixControlView extends VBox {
         
         executionTable = new TableView<>();
         executionTable.setPrefHeight(250);
+        executionTable.setEditable(true);
+        
+        TableColumn<RecipeIngredient, Boolean> includeCol = new TableColumn<>("Include");
+        includeCol.setPrefWidth(80);
+        includeCol.setCellValueFactory(cellData -> selectionProperty(cellData.getValue()));
+        includeCol.setCellFactory(column -> {
+            Callback<Integer, ObservableValue<Boolean>> callback = index -> {
+                if (index == null || index < 0 || index >= executionTable.getItems().size()) {
+                    return new SimpleBooleanProperty(false);
+                }
+                RecipeIngredient item = executionTable.getItems().get(index);
+                return selectionProperty(item);
+            };
+            CheckBoxTableCell<RecipeIngredient, Boolean> cell = new CheckBoxTableCell<>(callback);
+            cell.setAlignment(Pos.CENTER);
+            return cell;
+        });
+        includeCol.setEditable(true);
+        includeCol.setStyle("-fx-alignment: CENTER;");
         
         TableColumn<RecipeIngredient, Integer> orderCol = new TableColumn<>("Order");
         orderCol.setCellValueFactory(new PropertyValueFactory<>("sequenceOrder"));
@@ -391,7 +417,7 @@ public class MixControlView extends VBox {
             new javafx.beans.property.SimpleStringProperty("Ready"));
         statusCol.setPrefWidth(150);
         
-        executionTable.getColumns().addAll(orderCol, nameCol, slaveCol, pinCol, durationCol, formulaCol, statusCol);
+        executionTable.getColumns().addAll(includeCol, orderCol, nameCol, slaveCol, pinCol, durationCol, formulaCol, statusCol);
         
         // Control buttons
         HBox controlButtons = new HBox(10);
@@ -478,6 +504,7 @@ public class MixControlView extends VBox {
     private void loadRecipeForExecution() {
         Recipe selected = recipeCombo.getValue();
         if (selected == null) {
+            ingredientSelectionMap.clear();
             executionTable.getItems().clear();
             executeButton.setDisable(true);
             statusLabel.setText("Ready - Select a recipe to begin");
@@ -494,9 +521,7 @@ public class MixControlView extends VBox {
         log("Total duration: " + selected.getTotalDuration() + " ms (" + 
             String.format("%.2f", selected.getTotalDuration() / 1000.0) + " seconds)");
         
-        // Update calculated info
-        updateCalculatedInfo();
-        updateStockWarning();
+        // Update calculated info and stock warning will be handled after table population
         
         // Check if all ingredients are configured
         boolean allConfigured = true;
@@ -519,8 +544,15 @@ public class MixControlView extends VBox {
         }
         
         // Load to table
-        executionTable.setItems(FXCollections.observableArrayList(selected.getIngredients()));
+        List<RecipeIngredient> ingredientsForTable = new ArrayList<>(selected.getIngredients());
+        ingredientSelectionMap.clear();
+        for (RecipeIngredient ri : ingredientsForTable) {
+            ingredientSelectionMap.put(ri, createSelectionProperty(ri));
+        }
+        executionTable.setItems(FXCollections.observableArrayList(ingredientsForTable));
+        executionTable.refresh();
         
+        updateCalculatedInfo();
         // Update stock warning which will also handle button enable/disable
         updateStockWarning();
         
@@ -548,6 +580,22 @@ public class MixControlView extends VBox {
         
         // Check stock availability BEFORE execution
         int desiredBatchSize = batchSizeSpinner.getValue();
+        
+        List<RecipeIngredient> selectedIngredients = getSelectedIngredients();
+        if (selectedIngredients.isEmpty()) {
+            stockInfoPanel.setVisible(true);
+            stockInfoPanel.setManaged(true);
+            stockInfoPanel.setStyle("-fx-background-color: #FFF3E0; -fx-border-color: #FB8C00; -fx-border-width: 2px; -fx-border-radius: 5px; -fx-background-radius: 5px;");
+            stockStatusLabel.setText("⚠️ Niciun ingredient selectat\n\nSelectează cel puțin un ingredient din listă pentru a putea fabrica rețeta.");
+            stockStatusLabel.setStyle("-fx-text-fill: #E65100; -fx-font-weight: bold;");
+            stockWarningLabel.setVisible(false);
+            stockWarningLabel.setManaged(false);
+            stockWarningLabel.setText("");
+            executeButton.setDisable(true);
+            executeParallelButton.setDisable(true);
+            return;
+        }
+        
         List<String> insufficientStock = checkStockAvailability(selected, desiredBatchSize);
         if (insufficientStock != null) {
             StringBuilder message = new StringBuilder("⚠️ INSUFFICIENT STOCK!\n\n");
@@ -596,10 +644,12 @@ public class MixControlView extends VBox {
             }
         }
         
+        List<RecipeIngredient> ingredientsToExecute = new ArrayList<>(selectedIngredients);
+        
         // Execute in background thread to not block UI
         new Thread(() -> {
             try {
-                List<RecipeIngredient> ingredients = selected.getIngredients();
+                List<RecipeIngredient> ingredients = ingredientsToExecute;
                 int totalSteps = ingredients.size();
                 
                 // Calculate scale factor for this batch
@@ -644,7 +694,7 @@ public class MixControlView extends VBox {
                 if (executing) {
                     // Consume stock AFTER successful execution
                     final int finalDesiredBatch = desiredBatchSize;
-                    consumeStock(selected, finalDesiredBatch);
+                    consumeStock(selected, ingredients, finalDesiredBatch);
                     
                     Platform.runLater(() -> {
                         log("\n========================================");
@@ -810,6 +860,12 @@ public class MixControlView extends VBox {
             return;
         }
         
+        List<RecipeIngredient> selectedIngredients = getSelectedIngredients();
+        if (selectedIngredients.isEmpty()) {
+            showAlert(Alert.AlertType.WARNING, "No Ingredients Selected", "Select at least one ingredient before executing.");
+            return;
+        }
+        
         // Check stock availability BEFORE execution
         int desiredBatchSize = batchSizeSpinner.getValue();
         List<String> insufficientStock = checkStockAvailability(selected, desiredBatchSize);
@@ -836,7 +892,7 @@ public class MixControlView extends VBox {
             return;
         }
         
-        List<RecipeIngredient> ingredients = selected.getIngredients().stream()
+        List<RecipeIngredient> ingredients = selectedIngredients.stream()
             .sorted(Comparator.comparingInt(ri -> ri.getSequenceOrder() != null ? ri.getSequenceOrder() : 0))
             .collect(Collectors.toList());
         
@@ -1076,7 +1132,7 @@ public class MixControlView extends VBox {
                     
                     // Consume stock AFTER successful execution
                     final int finalDesiredBatch = desiredBatchSize;
-                    consumeStock(selected, finalDesiredBatch);
+                    consumeStock(selected, ingredients, finalDesiredBatch);
                     
                     Platform.runLater(() -> {
                         progressBar.setProgress(1.0);
@@ -1128,14 +1184,21 @@ public class MixControlView extends VBox {
         if (recipe == null || recipe.getIngredients() == null || recipe.getIngredients().isEmpty()) {
             return estimates;
         }
-
+        
+        List<RecipeIngredient> ingredientsToConsider = recipe.getIngredients().stream()
+            .filter(this::isIngredientSelected)
+            .collect(Collectors.toList());
+        if (ingredientsToConsider.isEmpty()) {
+            return estimates;
+        }
+        
         int originalBatchSize = recipe.getBatchSize() != null ? recipe.getBatchSize() : 100;
         double scaleFactor = (double) desiredBatchSize / originalBatchSize;
-
+        
         Map<String, List<Integer>> durationsByUid = new HashMap<>();
         int segmentCount = 0;
-
-        for (RecipeIngredient ri : recipe.getIngredients()) {
+        
+        for (RecipeIngredient ri : ingredientsToConsider) {
             Integer baseDuration = ri.getPulseDuration();
             String uid = ri.getSlaveUid();
             if (baseDuration == null || uid == null) {
@@ -1235,6 +1298,9 @@ public class MixControlView extends VBox {
             originalBatchSize, desiredBatchSize, scaleFactor));
         
         for (RecipeIngredient ri : recipe.getIngredients()) {
+            if (!isIngredientSelected(ri)) {
+                continue;
+            }
             try {
                 // Load ingredient from database to get current stock
                 Ingredient ingredient = ingredientRepository.findById(ri.getIngredientId()).orElse(null);
@@ -1267,8 +1333,13 @@ public class MixControlView extends VBox {
      * @param recipe The recipe that was executed
      * @param desiredBatchSize The actual quantity produced in grams
      */
-    private void consumeStock(Recipe recipe, int desiredBatchSize) {
+    private void consumeStock(Recipe recipe, List<RecipeIngredient> executedIngredients, int desiredBatchSize) {
         log("\n--- Updating stock quantities ---");
+        
+        if (executedIngredients == null || executedIngredients.isEmpty()) {
+            log("No ingredients selected for execution; skipping stock update.");
+            return;
+        }
         
         int originalBatchSize = recipe.getBatchSize() != null ? recipe.getBatchSize() : 100;
         double scaleFactor = (double) desiredBatchSize / originalBatchSize;
@@ -1276,7 +1347,7 @@ public class MixControlView extends VBox {
         log(String.format("Consuming stock for %d g final product (scale factor: %.2f)", 
             desiredBatchSize, scaleFactor));
         
-        for (RecipeIngredient ri : recipe.getIngredients()) {
+        for (RecipeIngredient ri : executedIngredients) {
             try {
                 // Load ingredient from database
                 Ingredient ingredient = ingredientRepository.findById(ri.getIngredientId()).orElse(null);
@@ -1333,6 +1404,10 @@ public class MixControlView extends VBox {
         
         ExecutionEstimates estimates = calculateExecutionEstimates(selected, desiredBatch);
         List<String> runtimeParts = new ArrayList<>();
+        if (getSelectedIngredients().isEmpty()) {
+            executionTimeLabel.setText("Selectează ingrediente pentru a calcula durata execuției.");
+            return;
+        }
         if (estimates.sequentialMs > 0) {
             runtimeParts.add("Sequential: " + formatDuration(estimates.sequentialMs));
         }
@@ -1379,6 +1454,22 @@ public class MixControlView extends VBox {
         
         // Check stock availability
         int desiredBatchSize = batchSizeSpinner.getValue();
+        
+        List<RecipeIngredient> selectedIngredients = getSelectedIngredients();
+        if (selectedIngredients.isEmpty()) {
+            stockInfoPanel.setVisible(true);
+            stockInfoPanel.setManaged(true);
+            stockInfoPanel.setStyle("-fx-background-color: #FFF3E0; -fx-border-color: #FB8C00; -fx-border-width: 2px; -fx-border-radius: 5px; -fx-background-radius: 5px;");
+            stockStatusLabel.setText("⚠️ Niciun ingredient selectat\n\nSelectează cel puțin un ingredient din listă pentru a putea fabrica rețeta.");
+            stockStatusLabel.setStyle("-fx-text-fill: #E65100; -fx-font-weight: bold;");
+            stockWarningLabel.setVisible(false);
+            stockWarningLabel.setManaged(false);
+            stockWarningLabel.setText("");
+            executeButton.setDisable(true);
+            executeParallelButton.setDisable(true);
+            return;
+        }
+        
         List<String> insufficientStock = checkStockAvailability(selected, desiredBatchSize);
         
         // Calculate max producible quantity (always calculate this for display)
@@ -1470,6 +1561,38 @@ public class MixControlView extends VBox {
         }
     }
     
+    private BooleanProperty createSelectionProperty(RecipeIngredient ri) {
+        SimpleBooleanProperty prop = new SimpleBooleanProperty(true);
+        prop.addListener((obs, oldVal, newVal) -> Platform.runLater(() -> {
+            updateCalculatedInfo();
+            updateStockWarning();
+            if (executionTable != null) {
+                executionTable.refresh();
+            }
+        }));
+        return prop;
+    }
+    
+    private BooleanProperty selectionProperty(RecipeIngredient ri) {
+        if (ri == null) {
+            return new SimpleBooleanProperty(false);
+        }
+        return ingredientSelectionMap.computeIfAbsent(ri, this::createSelectionProperty);
+    }
+    
+    private boolean isIngredientSelected(RecipeIngredient ri) {
+        return selectionProperty(ri).get();
+    }
+    
+    private List<RecipeIngredient> getSelectedIngredients() {
+        if (executionTable == null || executionTable.getItems() == null) {
+            return Collections.emptyList();
+        }
+        return executionTable.getItems().stream()
+            .filter(this::isIngredientSelected)
+            .collect(Collectors.toList());
+    }
+    
     /**
      * Calculate grams from duration using ingredient's msPerGram configuration
      * Uses msPerGramLarge or msPerGramSmall based on calculated grams and threshold
@@ -1552,12 +1675,19 @@ public class MixControlView extends VBox {
             return 0;
         }
         
+        if (getSelectedIngredients().isEmpty()) {
+            return 0;
+        }
+        
         int originalBatchSize = recipe.getBatchSize() != null ? recipe.getBatchSize() : 100;
         
         // For each ingredient, calculate how much of the recipe we can produce
         double minRatio = Double.MAX_VALUE;
         
         for (RecipeIngredient ri : recipe.getIngredients()) {
+            if (!isIngredientSelected(ri)) {
+                continue;
+            }
             try {
                 // Load ingredient from database to get current stock
                 Ingredient ingredient = ingredientRepository.findById(ri.getIngredientId()).orElse(null);
