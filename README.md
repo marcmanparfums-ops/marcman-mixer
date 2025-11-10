@@ -1,3 +1,22 @@
+# Procedura build executabil:
+
+- din meniul de start aleg "git bash"
+- cd Documents/MarcmanMixer # navighez in directorul proiectului
+- git add . # adaug ultimele modificari la cod
+- git commit -m "mesaj care descrie modificarile" # salvez modificarile in istoric
+- git push # pun modificarile pe server
+- exit # inchid terminalul
+- in browser navighez la proiect - https://github.com/marcmanparfums-ops/marcman-mixer/releases
+- notez ultima versiune (de ex. 0.0.11)
+- aleg "Draft a new release"
+- aleg "Select tag" si apoi "Create new tag"
+- introduc numele tag-ului nou - de ex. 0.0.12 si apas "Create"
+- in campul "Title" adaug aceeasi versiune (0.0.12)
+- aleg "Publish release"
+- in meniul "Actions" apare statusul build-ului
+- dupa ce build-ul se termina cu succes, in meniul "Releases" apare executabilul pentru ultima versiune
+
+
 # MarcmanMixer - Parfum Management System
 
 A professional JavaFX application for managing perfume recipes, ingredients (IFRA compliant), and automated mixing control via Arduino integration.
