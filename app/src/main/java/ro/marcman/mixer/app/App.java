@@ -2,16 +2,15 @@ package ro.marcman.mixer.app;
 
 import javafx.application.Application;
 import javafx.scene.Scene;
-import javafx.scene.control.Label;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import ro.marcman.mixer.adapters.ui.ArduinoView;
 import ro.marcman.mixer.adapters.ui.IngredientsView;
 import ro.marcman.mixer.adapters.ui.RecipesView;
 import ro.marcman.mixer.adapters.ui.MixControlView;
 import ro.marcman.mixer.adapters.ui.PinMapperView;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 /**
  * Main Application class for MarcmanMixer.
@@ -92,14 +91,11 @@ public class App extends Application {
             primaryStage.setTitle(APP_TITLE);
             
             // Set application icon
-            try {
-                javafx.scene.image.Image icon = new javafx.scene.image.Image(
-                    getClass().getResourceAsStream("/images/icon.png"));
-                primaryStage.getIcons().add(icon);
-                System.out.println("✓ Application icon loaded successfully");
-            } catch (Exception e) {
-                System.out.println("⚠ No application icon found (app/src/main/resources/images/icon.png)");
+            if (IconSupport.getAppIcons().isEmpty()) {
+                System.out.println("⚠ No application icon found at /images/mixer.ico or /images/icon.png");
                 System.out.println("  Application will run with default Java icon.");
+            } else {
+                IconSupport.applyTo(primaryStage);
             }
             
             primaryStage.setScene(scene);
@@ -171,6 +167,7 @@ public class App extends Application {
         
         launch(args);
     }
+
 }
 
 

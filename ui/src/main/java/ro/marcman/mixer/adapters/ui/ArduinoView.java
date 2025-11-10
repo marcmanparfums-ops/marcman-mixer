@@ -9,6 +9,7 @@ import ro.marcman.mixer.serial.SerialListener;
 import ro.marcman.mixer.serial.SerialManager;
 import ro.marcman.mixer.serial.model.ArduinoCommand;
 import ro.marcman.mixer.serial.model.SerialResponse;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 /**
  * Procesor communication UI - Built programmatically without FXML
@@ -356,6 +357,7 @@ public class ArduinoView extends VBox {
     
     private void showAlert(Alert.AlertType type, String title, String message) {
         Alert alert = new Alert(type);
+        IconSupport.applyTo(alert);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);

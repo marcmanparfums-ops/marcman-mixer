@@ -2,20 +2,23 @@
   ICONITA APLICATIE - MarcmanMixer
 ==========================================
 
-Pentru a seta iconita aplicatiei:
+Iconita oficiala este `mixer.ico`.
 
-1. Pregateste o imagine PNG (recomandat 256x256 pixels sau 512x512)
-   - Nume fisier: icon.png
-   - Format: PNG cu transparenta
+1. Creeaza sau exporta iconita (ideal include dimensiuni 16, 32, 48, 128, 256 px)
+   - Nume fisier: mixer.ico
+   - Format: ICO, cu canal alpha
    - Tema: perfume bottle, lab equipment, sau "M" stylish
 
-2. Copiaza fisierul "icon.png" in acest director:
-   app/src/main/resources/images/icon.png
+2. Copiaza fisierul `mixer.ico` in acest director:
+   `app/src/main/resources/images/mixer.ico`
 
-3. Recompileaza aplicatia:
-   mvn clean install
+3. (Optional) Adauga si varianta PNG fallback:
+   - `icon.png` (256x256) pentru teste rapide sau compatibilitate veche
 
-4. Iconita va aparea:
+4. Recompileaza aplicatia:
+   `mvn clean install`
+
+5. Iconita va aparea:
    - In colțul ferestrei aplicației
    - In taskbar Windows
    - In Alt+Tab
@@ -23,11 +26,19 @@ Pentru a seta iconita aplicatiei:
 
 ==========================================
 ALTERNATIVE:
-- icon.ico (format Windows) - pentru compatibilitate
+- icon.png (format PNG) - fallback in cazul in care nu exista varianta .ico
 - icon@2x.png (512x512) - pentru rezoluții mari
 ==========================================
 
 Aplicatia va rula normal chiar daca iconita nu este prezenta.
+
+
+
+
+
+
+
+
 
 
 

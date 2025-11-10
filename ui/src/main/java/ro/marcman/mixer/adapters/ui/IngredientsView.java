@@ -13,6 +13,7 @@ import ro.marcman.mixer.core.ports.repository.IngredientRepository;
 import ro.marcman.mixer.serial.SerialManager;
 import ro.marcman.mixer.sqlite.DatabaseManager;
 import ro.marcman.mixer.sqlite.IngredientRepositoryImpl;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -430,7 +431,7 @@ public class IngredientsView extends VBox {
     }
     
     private void showIngredientDetails(Ingredient ingredient) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        Alert alert = createAlert(Alert.AlertType.INFORMATION);
         alert.setTitle("Ingredient Details");
         alert.setHeaderText(ingredient.getName());
         
@@ -595,7 +596,7 @@ public class IngredientsView extends VBox {
     }
     
     private void showArduinoConfigDialog(Ingredient ingredient) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Configure Ingredient");
         dialog.setHeaderText("Configure: " + ingredient.getName());
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1297,8 +1298,20 @@ public class IngredientsView extends VBox {
         });
     }
     
-    private void showAlert(Alert.AlertType type, String title, String message) {
+    private Alert createAlert(Alert.AlertType type) {
         Alert alert = new Alert(type);
+        IconSupport.applyTo(alert);
+        return alert;
+    }
+
+    private <T> Dialog<T> createDialog() {
+        Dialog<T> dialog = new Dialog<>();
+        IconSupport.applyTo(dialog);
+        return dialog;
+    }
+
+    private void showAlert(Alert.AlertType type, String title, String message) {
+        Alert alert = createAlert(type);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
@@ -1306,7 +1319,7 @@ public class IngredientsView extends VBox {
     }
     
     private void showError(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
+        Alert alert = createAlert(Alert.AlertType.ERROR);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
@@ -1340,7 +1353,7 @@ public class IngredientsView extends VBox {
             }
         
             // Create confirmation dialog
-            Alert confirmDialog = new Alert(Alert.AlertType.CONFIRMATION);
+                Alert confirmDialog = createAlert(Alert.AlertType.CONFIRMATION);
             confirmDialog.setTitle("⚠️ Delete Ingredients Without Pins");
             confirmDialog.setHeaderText("Delete ingredients without Arduino pins?");
             
@@ -1460,7 +1473,7 @@ public class IngredientsView extends VBox {
     
     private void clearAllIngredients() {
         // Create confirmation dialog
-        Alert confirmDialog = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirmDialog = createAlert(Alert.AlertType.CONFIRMATION);
         confirmDialog.setTitle("⚠️ Clear All Ingredients");
         confirmDialog.setHeaderText("This will DELETE ALL ingredients from the database!");
         confirmDialog.setContentText(
@@ -1523,7 +1536,7 @@ public class IngredientsView extends VBox {
     }
     
     private void showUpdateStockDialog(Ingredient ingredient) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("📦 Update Stock Quantity");
         dialog.setHeaderText("Update stock for: " + ingredient.getName());
         

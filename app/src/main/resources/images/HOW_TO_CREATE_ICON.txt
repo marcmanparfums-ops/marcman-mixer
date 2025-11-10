@@ -9,11 +9,13 @@ METODA 1: ONLINE (CEL MAI SIMPLU)
    
 2. Cauta: "perfume bottle", "lab equipment", "M letter"
 
-3. Descarca ca PNG (256x256 sau 512x512)
+3. Descarca varianta PNG (512x512) si converteste-o in ICO:
+   - https://cloudconvert.com/png-to-ico
+   - https://convertico.com/
 
-4. Redenumeste in "icon.png"
+4. Salveaza fisierul final ca "mixer.ico"
 
-5. Copiaza in: app/src/main/resources/images/icon.png
+5. Copiaza in: app/src/main/resources/images/mixer.ico
 
 
 METODA 2: TEXT EMOJI (SIMPLU)
@@ -25,7 +27,7 @@ Poti folosi un emoji ca iconita temporara:
 🔬 - microscope
 🧴 - bottle
 
-Salvezi un screenshot al emoji-ului ca icon.png
+Salvezi un screenshot al emoji-ului, il cureti pe fundal transparent si il convertesti in `mixer.ico`
 
 
 METODA 3: GENERARE AI (PROFESIONAL)
@@ -39,12 +41,20 @@ Foloseste ChatGPT/DALL-E:
 RECOMANDARI:
 ------------
 ✓ Dimensiune: 256x256 px (sau 512x512)
-✓ Format: PNG cu transparenta
+✓ Format: export final ICO cu transparenta
 ✓ Stil: Simplu, clar, recognizable
 ✓ Culori: Pastels sau brand colors
 ✓ Tema: Lab/Science/Perfume
 
 ==========================================
+
+
+
+
+
+
+
+
 
 
 

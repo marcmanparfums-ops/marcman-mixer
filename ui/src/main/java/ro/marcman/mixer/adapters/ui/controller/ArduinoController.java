@@ -8,6 +8,7 @@ import ro.marcman.mixer.serial.SerialListener;
 import ro.marcman.mixer.serial.SerialManager;
 import ro.marcman.mixer.serial.model.ArduinoCommand;
 import ro.marcman.mixer.serial.model.SerialResponse;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 /**
  * Controller for Arduino serial communication interface.
@@ -207,6 +208,7 @@ public class ArduinoController {
     
     private void showAlert(Alert.AlertType type, String title, String message) {
         Alert alert = new Alert(type);
+        IconSupport.applyTo(alert);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);

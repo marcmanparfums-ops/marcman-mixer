@@ -15,6 +15,7 @@ import ro.marcman.mixer.serial.model.ArduinoCommand;
 import ro.marcman.mixer.serial.model.SerialResponse;
 import ro.marcman.mixer.sqlite.DatabaseManager;
 import ro.marcman.mixer.sqlite.IngredientRepositoryImpl;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -339,6 +340,7 @@ public class PinMapperView extends VBox {
     
     private void showAlert(Alert.AlertType type, String title, String message) {
         Alert alert = new Alert(type);
+        IconSupport.applyTo(alert);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);

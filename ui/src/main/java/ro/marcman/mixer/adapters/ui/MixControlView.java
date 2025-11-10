@@ -14,10 +14,9 @@ import ro.marcman.mixer.serial.SerialManager;
 import ro.marcman.mixer.sqlite.DatabaseManager;
 import ro.marcman.mixer.sqlite.IngredientRepositoryImpl;
 import ro.marcman.mixer.sqlite.RecipeRepositoryImpl;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -40,11 +39,14 @@ public class MixControlView extends VBox {
     private Button stopButton;
     private Spinner<Integer> batchSizeSpinner;
     private Label calculatedInfoLabel;
+    private Label executionTimeLabel;
     private Label stockWarningLabel;
     private Label stockStatusLabel;
     private VBox stockInfoPanel;
     
     private boolean executing = false;
+    private static final int MAX_BATCH_SIZE = 64;
+    private static final int MAX_DURATION_PER_COMMAND = 60000;
     
     public MixControlView(SerialManager serialManager) {
         super(15);
@@ -114,7 +116,7 @@ public class MixControlView extends VBox {
         Label batchLabel = new Label("Desired Quantity:");
         batchLabel.setStyle("-fx-font-weight: bold;");
         
-        batchSizeSpinner = new Spinner<>(1, 10000, 100, 1);
+        batchSizeSpinner = new Spinner<>(1, 10000000, 100, 1);
         batchSizeSpinner.setEditable(true);
         batchSizeSpinner.setPrefWidth(100);
         batchSizeSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -130,9 +132,19 @@ public class MixControlView extends VBox {
         
         calculatedInfoLabel = new Label("");
         calculatedInfoLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666; -fx-font-style: italic;");
+        calculatedInfoLabel.setWrapText(true);
+        calculatedInfoLabel.setMaxWidth(260);
         
-        HBox batchRow = new HBox(10, batchLabel, batchSizeSpinner, gramsLabel, calculatedInfoLabel);
+        executionTimeLabel = new Label("");
+        executionTimeLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #444;");
+        executionTimeLabel.setWrapText(true);
+        executionTimeLabel.setMaxWidth(260);
+        
+        HBox batchRow = new HBox(10, batchLabel, batchSizeSpinner, gramsLabel);
         batchRow.setAlignment(Pos.CENTER_LEFT);
+        
+        VBox batchInfoBox = new VBox(2, calculatedInfoLabel, executionTimeLabel);
+        batchInfoBox.setAlignment(Pos.CENTER_LEFT);
         
         // Stock status panel (always visible, real-time updates)
         stockStatusLabel = new Label("");
@@ -159,7 +171,7 @@ public class MixControlView extends VBox {
         Label noteLabel = new Label("Note: Recipe will be scaled proportionally based on desired quantity.");
         noteLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #999; -fx-font-style: italic;");
         
-        selectionBox.getChildren().addAll(recipeRow, batchRow, stockInfoPanel, stockWarningLabel, noteLabel);
+        selectionBox.getChildren().addAll(recipeRow, batchRow, batchInfoBox, stockInfoPanel, stockWarningLabel, noteLabel);
         selectionPane.setContent(selectionBox);
         
         // Execution plan table
@@ -420,12 +432,12 @@ public class MixControlView extends VBox {
         
         logArea = new TextArea();
         logArea.setEditable(false);
-        logArea.setPrefHeight(150);
+        logArea.setPrefHeight(320);
         logArea.setStyle("-fx-control-inner-background: #000000; -fx-text-fill: #00FF00; -fx-font-family: 'Courier New'; -fx-font-size: 11px;");
         logArea.setText("=== MarcmanMixer - Mix Control Log ===\n");
         
-        // Add all to main container
-        getChildren().addAll(
+        // Add main content with scroll support
+        VBox content = new VBox(10,
             title,
             selectionPane,
             planLabel,
@@ -435,6 +447,16 @@ public class MixControlView extends VBox {
             logLabel,
             logArea
         );
+        content.setPadding(new Insets(20));
+        
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        
+        getChildren().add(scrollPane);
+        
+        setPrefSize(1400, 900);
+        setMinSize(1200, 780);
     }
     
     private void loadRecipes() {
@@ -564,6 +586,15 @@ public class MixControlView extends VBox {
         log("STARTING RECIPE EXECUTION: " + selected.getName());
         log(String.format("Final product quantity: %d g", desiredBatchSize));
         log("========================================");
+        ExecutionEstimates estimates = calculateExecutionEstimates(selected, desiredBatchSize);
+        if (estimates.sequentialMs > 0 || estimates.parallelMs > 0) {
+            if (estimates.sequentialMs > 0) {
+                log("Estimated total runtime (sequential): " + formatDuration(estimates.sequentialMs));
+            }
+            if (estimates.parallelMs > 0) {
+                log("Estimated total runtime (parallel): " + formatDuration(estimates.parallelMs));
+            }
+        }
         
         // Execute in background thread to not block UI
         new Thread(() -> {
@@ -578,6 +609,9 @@ public class MixControlView extends VBox {
                 log(String.format("Scale factor: %.2f (producing %d g from %d g recipe)", 
                     scaleFactor, desiredBatchSize, originalBatchSize));
                 
+                // Ensure any previous batches are cleared
+                serialManager.sendRawCommand("batchabort");
+
                 for (int i = 0; i < ingredients.size(); i++) {
                     if (!executing) {
                         Platform.runLater(() -> log("EXECUTION STOPPED BY USER"));
@@ -593,14 +627,18 @@ public class MixControlView extends VBox {
                         progressBar.setProgress((double) currentStep / totalSteps);
                     });
                     
-                    // Execute ingredient with scaled duration
-                    executeIngredient(ri, currentStep, totalSteps, scaleFactor);
-                    
-                    // Wait for SCALED pump duration + small delay
-                    if (ri.getPulseDuration() != null) {
-                        int scaledDuration = (int) Math.round(ri.getPulseDuration() * scaleFactor);
-                        Thread.sleep(scaledDuration + 200);
+                    // Execute ingredient with scaled duration via batch protocol
+                    boolean stepOk = executeIngredient(ri, currentStep, totalSteps, scaleFactor);
+                    if (!stepOk) {
+                        Platform.runLater(() -> {
+                            statusLabel.setText(String.format("Step %d FAILED - execution halted", currentStep));
+                            statusLabel.setStyle("-fx-text-fill: red; -fx-font-weight: bold;");
+                        });
+                        executing = false;
+                        serialManager.sendRawCommand("batchabort");
+                        break;
                     }
+                    
                 }
                 
                 if (executing) {
@@ -641,7 +679,7 @@ public class MixControlView extends VBox {
         }).start();
     }
     
-    private void executeIngredient(RecipeIngredient ri, int step, int total, double scaleFactor) {
+    private boolean executeIngredient(RecipeIngredient ri, int step, int total, double scaleFactor) {
         String ingredientName = ri.getDisplayName();
         
         log(String.format("\n[Step %d/%d] %s", step, total, ingredientName));
@@ -655,7 +693,7 @@ public class MixControlView extends VBox {
         
         if (slaveUid == null || baseDuration == null) {
             log("  ERROR: Ingredient not properly configured!");
-            return;
+            return false;
         }
         
         // Scale duration based on desired batch size
@@ -693,7 +731,7 @@ public class MixControlView extends VBox {
                 log(String.format("  ⚠️ WARNING: SMALL pump not configured, using LARGE pump for %.2f g", scaledGrams));
             } else {
                 log("  ERROR: No pump configured for this ingredient!");
-                return;
+                return false;
             }
         } else {
             // Use LARGE pump for quantities >= 10g
@@ -703,7 +741,7 @@ public class MixControlView extends VBox {
                 log(String.format("  🔹 AUTO-SELECT: LARGE pump (quantity %.2f g >= 10g)", scaledGrams));
             } else {
                 log("  ERROR: LARGE pump not configured!");
-                return;
+                return false;
             }
         }
         
@@ -713,29 +751,51 @@ public class MixControlView extends VBox {
         }
         log(String.format("  PIN: %s (%d) - %s PUMP", pinDisplay, selectedPin, pumpType));
         
-        // Parse SLAVE ID from UID (0x1 -> 1)
-        int slaveId;
-        try {
-            String uidStr = slaveUid.replace("0x", "").replace("0X", "");
-            slaveId = Integer.parseInt(uidStr, 16);
-        } catch (NumberFormatException e) {
-            log("  ERROR: Invalid SLAVE UID format: " + slaveUid);
-            return;
+        if (scaledDuration <= 0) {
+            log("  WARNING: Scaled duration <= 0ms. Skipping command.");
+            return true;
         }
         
-        // Build pulse command for MASTER with SCALED duration and SELECTED pin
-        // Format: pulse <slave_id> <pin> <duration>
-        String command = String.format("pulse %d %d %d", slaveId, selectedPin, scaledDuration);
-        log("  Command: " + command);
+        String uidFormatted = normalizeUid(slaveUid);
+        int remaining = scaledDuration;
+        int partIndex = 1;
+        int totalParts = (int) Math.ceil((double) scaledDuration / MAX_DURATION_PER_COMMAND);
         
-        // Send to MASTER
-        boolean sent = serialManager.sendRawCommand(command);
-        if (sent) {
-            log("  Status: SENT to MASTER");
-            log("  Pumping...");
-        } else {
-            log("  ERROR: Failed to send command!");
+        while (remaining > 0 && executing) {
+            int chunkDuration = Math.min(remaining, MAX_DURATION_PER_COMMAND);
+            String suffix = totalParts > 1 ? String.format(" (part %d/%d)", partIndex, totalParts) : "";
+            String batchPrepCommand = String.format("batchprep %s %d:%d", uidFormatted, selectedPin, chunkDuration);
+            
+            log(String.format("  [BATCH] PREPARE%s -> %s", suffix, batchPrepCommand));
+            boolean prepSent = serialManager.sendRawCommand(batchPrepCommand);
+            if (!prepSent) {
+                log("  ERROR: Failed to send batchprep command!");
+                return false;
+            }
+            
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException ignored) { }
+            
+            log("  [BATCH] EXECUTE -> batchrun");
+            boolean runSent = serialManager.sendRawCommand("batchrun");
+            if (!runSent) {
+                log("  ERROR: Failed to send batchrun command! Aborting lot.");
+                serialManager.sendRawCommand("batchabort");
+                return false;
+            }
+            
+            log(String.format("  Status: Segment executat (%d ms)%s", chunkDuration, suffix));
+            
+            try {
+                Thread.sleep(chunkDuration + 200);
+            } catch (InterruptedException ignored) { }
+            
+            remaining -= chunkDuration;
+            partIndex++;
         }
+        
+        return true;
     }
     
     private void executeRecipeParallel() {
@@ -809,36 +869,58 @@ public class MixControlView extends VBox {
                 int originalBatchSize = selected.getBatchSize() != null ? selected.getBatchSize() : 100;
                 double scaleFactor = (double) desiredBatchSize / originalBatchSize;
                 
-                // Send all pulse commands simultaneously
                 log(String.format("Scale factor: %.2f (producing %d g from %d g recipe)", 
                     scaleFactor, desiredBatchSize, originalBatchSize));
-                log("Sending ALL commands at once...\n");
+                ExecutionEstimates estimates = calculateExecutionEstimates(selected, desiredBatchSize);
+                if (estimates.parallelMs > 0 || estimates.sequentialMs > 0) {
+                    if (estimates.parallelMs > 0) {
+                        log("Estimated total runtime (parallel): " + formatDuration(estimates.parallelMs));
+                    }
+                    if (estimates.sequentialMs > 0) {
+                        log("Equivalent sequential runtime: " + formatDuration(estimates.sequentialMs));
+                    }
+                }
+                log(String.format("Preparing BATCH commands (grouped by UID, max %d per batch)...\n", MAX_BATCH_SIZE));
+                serialManager.sendRawCommand("batchabort");
                 
-                int sentCount = 0;
-                int maxDuration = 0;
+                // Helper class to store command data
+                class CommandData {
+                    RecipeIngredient ingredient;
+                    String slaveUid;
+                    int pin;
+                    int duration;
+                    String ingredientName;
+                    
+                    CommandData(RecipeIngredient ri, String uid, int p, int d, String name) {
+                        ingredient = ri;
+                        slaveUid = uid;
+                        pin = p;
+                        duration = d;
+                        ingredientName = name;
+                    }
+                }
                 
-                for (int i = 0; i < ingredients.size(); i++) {
+                // Step 1: Prepare all commands and group by UID
+                List<CommandData> allCommands = new ArrayList<>();
+                
+                for (RecipeIngredient ri : ingredients) {
                     if (!executing) break;
                     
-                    RecipeIngredient ri = ingredients.get(i);
                     String ingredientName = ri.getDisplayName();
                     String slaveUid = ri.getSlaveUid();
                     Integer pinLarge = ri.getArduinoPin();
                     Integer pinSmall = ri.getIngredient() != null ? ri.getIngredient().getArduinoPinSmall() : null;
                     Integer baseDuration = ri.getPulseDuration();
                     
-                    log(String.format("[%d/%d] %s", i+1, ingredients.size(), ingredientName));
-                    log("  SLAVE: " + (slaveUid != null ? slaveUid : "N/A"));
-                    
                     if (slaveUid == null || baseDuration == null) {
-                        log("  ERROR: Ingredient not properly configured! SKIPPING");
+                        log(String.format("⚠️ SKIP: %s (not configured)", ingredientName));
                         continue;
                     }
                     
-                    // Scale duration based on desired batch size
+                    // Scale duration
                     int scaledDuration = (int) Math.round(baseDuration * scaleFactor);
                     
-                    // Calculate grams using ingredient's msPerGram configuration
+                    // Calculate grams for pump selection
                     RecipeIngredient tempRi = RecipeIngredient.builder()
                         .pulseDuration(baseDuration)
                         .ingredient(ri.getIngredient())
@@ -846,85 +928,142 @@ public class MixControlView extends VBox {
                     double baseGrams = calculateBaseGramsFromDurationWithConfig(tempRi, ri.getIngredient());
                     double scaledGrams = baseGrams * scaleFactor;
                     
-                    log(String.format("  Base: %d ms (%.2f g) → Scaled: %d ms (%.2f g)", 
-                        baseDuration, baseGrams, scaledDuration, scaledGrams));
-                    
-                    // ⚠️ DUAL PUMP SELECTION: Choose pump based on quantity
+                    // Select pump based on quantity
                     Integer selectedPin = null;
-                    String pumpType = "";
-                    
-                    // Get threshold from ingredient configuration
                     Double threshold = ri.getIngredient() != null && ri.getIngredient().getPumpThresholdGrams() != null ?
                         ri.getIngredient().getPumpThresholdGrams() : 10.0;
                     
                     if (scaledGrams < threshold) {
-                        // Use SMALL pump for quantities below threshold
-                        if (pinSmall != null) {
-                            selectedPin = pinSmall;
-                            pumpType = "SMALL";
-                            log(String.format("  🔸 AUTO-SELECT: SMALL pump (quantity %.2f g < %.2f g threshold)", scaledGrams, threshold));
-                        } else if (pinLarge != null) {
-                            // Fallback to large pump if small not configured
-                            selectedPin = pinLarge;
-                            pumpType = "LARGE (fallback)";
-                            log(String.format("  ⚠️ WARNING: SMALL pump not configured, using LARGE pump for %.2f g", scaledGrams));
-                        } else {
-                            log("  ERROR: No pump configured! SKIPPING");
-                            continue;
-                        }
+                        selectedPin = pinSmall != null ? pinSmall : pinLarge;
                     } else {
-                        // Use LARGE pump for quantities >= 10g
-                        if (pinLarge != null) {
-                            selectedPin = pinLarge;
-                            pumpType = "LARGE";
-                            log(String.format("  🔹 AUTO-SELECT: LARGE pump (quantity %.2f g >= 10g)", scaledGrams));
-                        } else {
-                            log("  ERROR: LARGE pump not configured! SKIPPING");
-                            continue;
-                        }
+                        selectedPin = pinLarge;
                     }
                     
-                    String pinDisplay = (selectedPin >= 54 && selectedPin <= 69) ? "A" + (selectedPin - 54) : String.valueOf(selectedPin);
-                    log(String.format("  PIN: %s (%d) - %s PUMP", pinDisplay, selectedPin, pumpType));
-                    
-                    // Parse SLAVE ID from UID
-                    int slaveId;
-                    try {
-                        String uidStr = slaveUid.replace("0x", "").replace("0X", "");
-                        slaveId = Integer.parseInt(uidStr, 16);
-                    } catch (NumberFormatException e) {
-                        log("  ERROR: Invalid SLAVE UID format: " + slaveUid);
+                    if (selectedPin == null) {
+                        log(String.format("⚠️ SKIP: %s (no pump configured)", ingredientName));
                         continue;
                     }
                     
-                    // Build and send pulse command with SCALED duration and SELECTED pin
-                    String command = String.format("pulse %d %d %d", slaveId, selectedPin, scaledDuration);
-                    log("  Command: " + command);
-                    
-                    boolean sent = serialManager.sendRawCommand(command);
-                    if (sent) {
-                        log("  Status: SENT");
-                        sentCount++;
-                        if (scaledDuration > maxDuration) {
-                            maxDuration = scaledDuration;
-                        }
-                    } else {
-                        log("  ERROR: Failed to send!");
+                    if (scaledDuration <= 0) {
+                        log(String.format("⚠️ SKIP: %s (scaled duration <= 0)", ingredientName));
+                        continue;
                     }
                     
-                    // Small delay to avoid overwhelming the serial buffer
-                    Thread.sleep(50);
-                    
-                    // Update progress
-                    final int currentStep = i + 1;
-                    final int totalSteps = ingredients.size();
-                    Platform.runLater(() -> {
-                        double progress = (double) currentStep / totalSteps;
-                        progressBar.setProgress(progress);
-                        statusLabel.setText(String.format("Sent %d/%d commands...", currentStep, totalSteps));
-                    });
+                    int remaining = scaledDuration;
+                    int partIndex = 1;
+                    int totalParts = (int) Math.ceil((double) scaledDuration / MAX_DURATION_PER_COMMAND);
+                    while (remaining > 0) {
+                        int chunkDuration = Math.min(remaining, MAX_DURATION_PER_COMMAND);
+                        String namePart = totalParts > 1
+                            ? String.format("%s [part %d/%d]", ingredientName, partIndex, totalParts)
+                            : ingredientName;
+                        allCommands.add(new CommandData(ri, slaveUid, selectedPin, chunkDuration, namePart));
+                        remaining -= chunkDuration;
+                        partIndex++;
+                    }
                 }
                 
+                // Step 2: Group commands by UID
+                Map<String, List<CommandData>> commandsByUid = allCommands.stream()
+                    .collect(Collectors.groupingBy(cmd -> cmd.slaveUid));
+                
+                log(String.format("Grouped %d commands into %d UID groups\n", allCommands.size(), commandsByUid.size()));
+                
+                // Step 3: Send batch commands (max 64 per batch)
+                int totalBatches = 0;
+                int sentCount = 0;
+                int maxDuration = 0;
+                
+                for (Map.Entry<String, List<CommandData>> entry : commandsByUid.entrySet()) {
+                    if (!executing) break;
+                    
+                    String uid = entry.getKey();
+                    List<CommandData> uidCommands = entry.getValue();
+                    
+                    log(String.format("UID %s: %d commands", uid, uidCommands.size()));
+                    
+                    // Split into batches of max MAX_BATCH_SIZE
+                    // Example: 120 commands → Batch 1 (64 commands) + Batch 2 (56 commands)
+                    int numBatchesForUid = (uidCommands.size() + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE;
+                    log(String.format("  Will split into %d batch(es) of max %d commands each", 
+                        numBatchesForUid, MAX_BATCH_SIZE));
+                    
+                    for (int batchStart = 0; batchStart < uidCommands.size(); batchStart += MAX_BATCH_SIZE) {
+                        if (!executing) break;
+                        
+                        int batchEnd = Math.min(batchStart + MAX_BATCH_SIZE, uidCommands.size());
+                        List<CommandData> batch = uidCommands.subList(batchStart, batchEnd);
+                        
+                        totalBatches++;
+                        final int batchNumForUid = (batchStart / MAX_BATCH_SIZE) + 1;
+                        final int numBatchesForUidFinal = numBatchesForUid;
+                        log(String.format("  Batch %d/%d for UID %s: %d commands (items %d-%d)", 
+                            batchNumForUid, numBatchesForUidFinal, uid, batch.size(), batchStart, batchEnd - 1));
+                        
+                        // Build batch command: batchprep <uid> <pin1>:<duration1> ...
+                        String uidFormatted = normalizeUid(uid);
+                        StringBuilder batchCmd = new StringBuilder("batchprep " + uidFormatted);
+
+                        for (CommandData cmd : batch) {
+                            batchCmd.append(" ").append(cmd.pin).append(":").append(cmd.duration);
+                            sentCount++;
+                            if (cmd.duration > maxDuration) {
+                                maxDuration = cmd.duration;
+                            }
+                            log(String.format("    - %s: PIN %d, %d ms", cmd.ingredientName, cmd.pin, cmd.duration));
+                        }
+
+                        // Send batch preparation command
+                        String command = batchCmd.toString();
+                        log(String.format("  Command: %s", command));
+
+                        boolean sent = serialManager.sendRawCommand(command);
+                        if (sent) {
+                            log(String.format("  ✅ Lot %d/%d pregătit (%d comenzi)",
+                                batchNumForUid, numBatchesForUidFinal, batch.size()));
+                        } else {
+                            log(String.format("  ❌ Pregătirea lotului %d/%d a eșuat!",
+                                batchNumForUid, numBatchesForUidFinal));
+                            serialManager.sendRawCommand("batchabort");
+                            executing = false;
+                            Platform.runLater(() -> {
+                                statusLabel.setText("Batch preparation failed");
+                                statusLabel.setStyle("-fx-text-fill: red; -fx-font-weight: bold;");
+                            });
+                            return;
+                        }
+
+                        Thread.sleep(50);
+
+                        // Update progress
+                        final int currentBatches = totalBatches;
+                        final int totalItems = allCommands.size();
+                        final int sentCountFinal = sentCount;
+                        Platform.runLater(() -> {
+                            double progress = Math.min((double) sentCountFinal / totalItems, 1.0);
+                            progressBar.setProgress(progress);
+                            statusLabel.setText(String.format("Sent batch %d (%d/%d commands)...", 
+                                currentBatches, sentCountFinal, totalItems));
+                        });
+                    }
+                }
+                
+                if (executing) {
+                    log(">>> Execut batchrun (execuție simultană)...");
+                    boolean runSent = serialManager.sendRawCommand("batchrun");
+                    if (!runSent) {
+                        log("❌ batchrun a eșuat - trimit batchabort");
+                        serialManager.sendRawCommand("batchabort");
+                        executing = false;
+                        Platform.runLater(() -> {
+                            statusLabel.setText("Batchrun failed");
+                            statusLabel.setStyle("-fx-text-fill: red; -fx-font-weight: bold;");
+                        });
+                        return;
+                    }
+                    Thread.sleep(100);
+                }
+
                 if (executing) {
                     log(String.format("\n========================================"));
                     log(String.format("ALL COMMANDS SENT! (%d commands)", sentCount));
@@ -974,8 +1113,88 @@ public class MixControlView extends VBox {
         log("\nSTOP requested - halting execution...");
         statusLabel.setText("Execution stopped");
         statusLabel.setStyle("-fx-text-fill: orange; -fx-font-weight: bold;");
+        if (serialManager != null && serialManager.isConnected()) {
+            serialManager.sendRawCommand("batchabort");
+        }
     }
     
+    private static class ExecutionEstimates {
+        long sequentialMs;
+        long parallelMs;
+    }
+
+    private ExecutionEstimates calculateExecutionEstimates(Recipe recipe, int desiredBatchSize) {
+        ExecutionEstimates estimates = new ExecutionEstimates();
+        if (recipe == null || recipe.getIngredients() == null || recipe.getIngredients().isEmpty()) {
+            return estimates;
+        }
+
+        int originalBatchSize = recipe.getBatchSize() != null ? recipe.getBatchSize() : 100;
+        double scaleFactor = (double) desiredBatchSize / originalBatchSize;
+
+        Map<String, List<Integer>> durationsByUid = new HashMap<>();
+        int segmentCount = 0;
+
+        for (RecipeIngredient ri : recipe.getIngredients()) {
+            Integer baseDuration = ri.getPulseDuration();
+            String uid = ri.getSlaveUid();
+            if (baseDuration == null || uid == null) {
+                continue;
+            }
+            int scaled = (int) Math.round(baseDuration * scaleFactor);
+            if (scaled < 0) {
+                scaled = 0;
+            }
+            if (scaled == 0) continue;
+
+            int remaining = scaled;
+            while (remaining > 0) {
+                int chunk = Math.min(remaining, MAX_DURATION_PER_COMMAND);
+                estimates.sequentialMs += chunk;
+                durationsByUid.computeIfAbsent(uid, k -> new ArrayList<>()).add(chunk);
+                remaining -= chunk;
+                segmentCount++;
+            }
+        }
+
+        if (segmentCount > 0) {
+            estimates.sequentialMs += (long) segmentCount * 200L;
+        }
+
+        long maxParallel = 0;
+        for (List<Integer> durations : durationsByUid.values()) {
+            if (durations.isEmpty()) {
+                continue;
+            }
+            long uidTotal = 0;
+            for (int i = 0; i < durations.size(); i += MAX_BATCH_SIZE) {
+                int end = Math.min(i + MAX_BATCH_SIZE, durations.size());
+                int batchMax = durations.subList(i, end).stream()
+                    .mapToInt(Integer::intValue)
+                    .max()
+                    .orElse(0);
+                uidTotal += batchMax;
+            }
+            maxParallel = Math.max(maxParallel, uidTotal);
+        }
+        estimates.parallelMs = maxParallel;
+        return estimates;
+    }
+    
+    private String formatDuration(long ms) {
+        if (ms <= 0) return "0 s";
+        double seconds = ms / 1000.0;
+        if (seconds < 60) {
+            return String.format("%.1f s", seconds);
+        }
+        double minutes = seconds / 60.0;
+        if (minutes < 60) {
+            return String.format("%.1f min", minutes);
+        }
+        double hours = minutes / 60.0;
+        return String.format("%.2f h", hours);
+    }
+
     private void log(String message) {
         Platform.runLater(() -> {
             logArea.appendText(message + "\n");
@@ -988,6 +1207,7 @@ public class MixControlView extends VBox {
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
+        IconSupport.applyTo(alert);
         alert.showAndWait();
     }
     
@@ -1095,6 +1315,7 @@ public class MixControlView extends VBox {
         Recipe selected = recipeCombo.getValue();
         if (selected == null) {
             calculatedInfoLabel.setText("");
+            executionTimeLabel.setText("");
             return;
         }
         
@@ -1102,11 +1323,28 @@ public class MixControlView extends VBox {
         int originalBatch = selected.getBatchSize() != null ? selected.getBatchSize() : 100;
         double scaleFactor = (double) desiredBatch / originalBatch;
         
+        StringBuilder info = new StringBuilder();
         if (Math.abs(scaleFactor - 1.0) < 0.01) {
-            calculatedInfoLabel.setText("(Original recipe size)");
+            info.append("Original recipe size");
         } else {
-            calculatedInfoLabel.setText(String.format("(%.1f%% of original %d g recipe)", 
+            info.append(String.format("%.1f%% of original %d g recipe", 
                 scaleFactor * 100, originalBatch));
+        }
+        
+        ExecutionEstimates estimates = calculateExecutionEstimates(selected, desiredBatch);
+        List<String> runtimeParts = new ArrayList<>();
+        if (estimates.sequentialMs > 0) {
+            runtimeParts.add("Sequential: " + formatDuration(estimates.sequentialMs));
+        }
+        if (estimates.parallelMs > 0) {
+            runtimeParts.add("Parallel: " + formatDuration(estimates.parallelMs));
+        }
+        
+        calculatedInfoLabel.setText(info.toString());
+        if (!runtimeParts.isEmpty()) {
+            executionTimeLabel.setText(String.join(" | ", runtimeParts));
+        } else {
+            executionTimeLabel.setText("");
         }
     }
     
@@ -1369,6 +1607,41 @@ public class MixControlView extends VBox {
         }
         
         return maxProducible;
+    }
+    
+    /**
+     * Normalize UID format to ensure it's in 0x... format
+     * Handles formats like: "1", "0x1", "0X1", "0x0001", etc.
+     */
+    private String normalizeUid(String uid) {
+        if (uid == null || uid.trim().isEmpty()) {
+            return "0x0";
+        }
+        
+        String trimmed = uid.trim();
+        
+        // If already starts with 0x or 0X, return as is
+        if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+            return trimmed;
+        }
+        
+        // Try to parse as hex number
+        try {
+            // Remove any leading zeros and parse
+            String clean = trimmed.replaceFirst("^0+", "");
+            if (clean.isEmpty()) clean = "0";
+            int value = Integer.parseInt(clean, 16);
+            return "0x" + Integer.toHexString(value);
+        } catch (NumberFormatException e) {
+            // If not a valid hex number, try decimal
+            try {
+                int value = Integer.parseInt(trimmed);
+                return "0x" + Integer.toHexString(value);
+            } catch (NumberFormatException e2) {
+                // If still fails, just add 0x prefix
+                return "0x" + trimmed;
+            }
+        }
     }
 }
 

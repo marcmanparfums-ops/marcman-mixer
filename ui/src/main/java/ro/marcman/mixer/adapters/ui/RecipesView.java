@@ -18,6 +18,7 @@ import ro.marcman.mixer.core.services.QuantityCalculator;
 import ro.marcman.mixer.sqlite.DatabaseManager;
 import ro.marcman.mixer.sqlite.IngredientRepositoryImpl;
 import ro.marcman.mixer.sqlite.RecipeRepositoryImpl;
+import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -150,7 +151,7 @@ public class RecipesView extends VBox {
     }
     
     private void showRecipeDialog(Recipe existingRecipe) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle(existingRecipe == null ? "New Recipe" : "Edit Recipe");
         dialog.setHeaderText(existingRecipe == null ? "Create a new perfume recipe" : "Edit: " + existingRecipe.getName());
         
@@ -430,7 +431,7 @@ public class RecipesView extends VBox {
     }
     
     private void showAddIngredientDialog(ObservableList<RecipeIngredient> recipeIngredients, int batchSize) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Add Ingredient to Recipe");
         dialog.setHeaderText("Search and select ingredient");
         
@@ -751,7 +752,7 @@ public class RecipesView extends VBox {
             return;
         }
         
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirm = createAlert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle("Confirm Delete");
         confirm.setHeaderText("Delete recipe: " + selected.getName() + "?");
         confirm.setContentText("This action cannot be undone.");
@@ -848,7 +849,7 @@ public class RecipesView extends VBox {
     }
     
     private void showPdfImportReviewDialog(String pdfFileName, List<IngredientMatcher.MatchedIngredient> matches, int autoAddedCount) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Review PDF Import - " + pdfFileName);
         dialog.setHeaderText("Review and confirm ingredients extracted from PDF");
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1012,7 +1013,7 @@ public class RecipesView extends VBox {
             recipeName, validMatches.size(), skipped
         );
         
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirm = createAlert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle("Confirm Recipe Creation");
         confirm.setHeaderText("Create Recipe from PDF");
         confirm.setContentText(confirmMsg);
@@ -1027,7 +1028,7 @@ public class RecipesView extends VBox {
                 
                 if (!unconfiguredIngredients.isEmpty()) {
                     // Show pin allocation dialog
-                    Alert pinAlert = new Alert(Alert.AlertType.CONFIRMATION);
+                    Alert pinAlert = createAlert(Alert.AlertType.CONFIRMATION);
                     pinAlert.setTitle("Arduino Configuration Required");
                     pinAlert.setHeaderText(String.format("%d ingredients need Arduino configuration", unconfiguredIngredients.size()));
                     pinAlert.setContentText("Would you like to configure SLAVE UID and PIN for these ingredients now?");
@@ -1053,7 +1054,7 @@ public class RecipesView extends VBox {
     }
     
     private void showEditDurationDialog(RecipeIngredient ingredient, TableView<RecipeIngredient> table) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Edit Ingredient - " + ingredient.getDisplayName());
         dialog.setHeaderText("Edit pumping duration and quantity");
         
@@ -1156,7 +1157,7 @@ public class RecipesView extends VBox {
     }
     
     private void showAddMissingIngredientDialog(IngredientMatcher.MatchedIngredient match, ObservableList<IngredientMatcher.MatchedIngredient> matchList) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Add Missing Ingredient");
         dialog.setHeaderText("Add new ingredient to database");
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1253,7 +1254,7 @@ public class RecipesView extends VBox {
     }
     
     private void showBulkPinAllocationDialog(List<Ingredient> ingredients, Runnable onComplete) {
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Configure Arduino - Bulk Pin Allocation");
         dialog.setHeaderText(String.format("Allocate SLAVE UID and PIN for %d ingredients", ingredients.size()));
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1447,8 +1448,20 @@ public class RecipesView extends VBox {
         }
     }
     
-    private void showAlert(Alert.AlertType type, String title, String message) {
+    private Alert createAlert(Alert.AlertType type) {
         Alert alert = new Alert(type);
+        IconSupport.applyTo(alert);
+        return alert;
+    }
+
+    private <T> Dialog<T> createDialog() {
+        Dialog<T> dialog = new Dialog<>();
+        IconSupport.applyTo(dialog);
+        return dialog;
+    }
+
+    private void showAlert(Alert.AlertType type, String title, String message) {
+        Alert alert = createAlert(type);
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
@@ -1569,7 +1582,7 @@ public class RecipesView extends VBox {
             return;
         }
         
-        Dialog<ButtonType> dialog = new Dialog<>();
+        Dialog<ButtonType> dialog = createDialog();
         dialog.setTitle("Configure PDF Ingredients - " + pdfFileName);
         dialog.setHeaderText("Review and configure ingredients before creating recipe");
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1873,7 +1886,7 @@ public class RecipesView extends VBox {
      * Show dialog to associate or disassociate a fuzzy-matched ingredient
      */
     private ButtonType showAssociateIngredientDialog(IngredientConfigurationInfo configInfo, ObservableList<IngredientConfigurationInfo> configInfosList) {
-        Dialog<ButtonType> associateDialog = new Dialog<>();
+        Dialog<ButtonType> associateDialog = createDialog();
         associateDialog.setTitle("Associate/Disassociate Ingredient");
         
         final IngredientConfigurationInfo finalConfigInfo = configInfo;
@@ -2183,7 +2196,7 @@ public class RecipesView extends VBox {
         // For now, we'll use a simplified version
         // TODO: Could reuse the Arduino configuration dialog from IngredientsView
         
-        Dialog<ButtonType> editDialog = new Dialog<>();
+        Dialog<ButtonType> editDialog = createDialog();
         editDialog.setTitle("Configure Ingredient");
         editDialog.setHeaderText("Configure: " + configInfo.pdfIngredient.getName());
         editDialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
