@@ -23,6 +23,7 @@ import ro.marcman.mixer.adapters.ui.util.IconSupport;
 import java.util.*;
 import java.util.stream.Collectors;
 import javafx.util.Callback;
+import javafx.scene.control.CheckBox;
 
 /**
  * Mix Control UI - Execute recipes automatically
@@ -200,7 +201,13 @@ public class MixControlView extends VBox {
                 RecipeIngredient item = executionTable.getItems().get(index);
                 return selectionProperty(item);
             };
-            CheckBoxTableCell<RecipeIngredient, Boolean> cell = new CheckBoxTableCell<>(callback);
+            CheckBoxTableCell<RecipeIngredient, Boolean> cell = new CheckBoxTableCell<RecipeIngredient, Boolean>(callback) {
+                @Override
+                public void updateItem(Boolean item, boolean empty) {
+                    super.updateItem(item, empty);
+                    applyCheckboxStyle(this, item, empty);
+                }
+            };
             cell.setAlignment(Pos.CENTER);
             return cell;
         });
@@ -1578,6 +1585,34 @@ public class MixControlView extends VBox {
             return new SimpleBooleanProperty(false);
         }
         return ingredientSelectionMap.computeIfAbsent(ri, this::createSelectionProperty);
+    }
+    
+    private void applyCheckboxStyle(CheckBoxTableCell<RecipeIngredient, Boolean> cell, Boolean item, boolean empty) {
+        if (cell == null) {
+            return;
+        }
+        
+        javafx.scene.Node graphic = cell.getGraphic();
+        
+        // Reset styles by default
+        cell.setStyle("");
+        if (graphic instanceof CheckBox) {
+            ((CheckBox) graphic).setStyle("");
+        }
+        
+        if (empty || graphic == null || !(graphic instanceof CheckBox)) {
+            return;
+        }
+        
+        CheckBox checkBox = (CheckBox) graphic;
+        
+        if (Boolean.TRUE.equals(item)) {
+            checkBox.setStyle("-fx-background-color: #C8E6C9; -fx-border-color: #388E3C; -fx-mark-color: #1B5E20; -fx-border-radius: 4; -fx-background-radius: 4; -fx-padding: 2;");
+            cell.setStyle("-fx-background-color: #E8F5E9;");
+        } else {
+            checkBox.setStyle("-fx-background-color: #FFCDD2; -fx-border-color: #C62828; -fx-mark-color: #B71C1C; -fx-border-radius: 4; -fx-background-radius: 4; -fx-padding: 2;");
+            cell.setStyle("-fx-background-color: #FFEBEE;");
+        }
     }
     
     private boolean isIngredientSelected(RecipeIngredient ri) {
