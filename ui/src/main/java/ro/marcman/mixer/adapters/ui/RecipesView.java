@@ -190,7 +190,7 @@ public class RecipesView extends VBox {
         TextField batchSizeField = new TextField();
         batchSizeField.setPromptText("e.g., 100");
         batchSizeField.setPrefWidth(150);
-        Label batchHintLabel = new Label("(Used for % → ms conversion: 1g = 20ms)");
+        Label batchHintLabel = new Label("(Used for % → ms conversion: 1g = ms/g configured per ingredient)");
         batchHintLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
         HBox batchBox = new HBox(10, batchSizeField, batchHintLabel);
         batchBox.setAlignment(Pos.CENTER_LEFT);
@@ -246,11 +246,12 @@ public class RecipesView extends VBox {
             try {
                 int batchSize = Integer.parseInt(batchSizeField.getText());
                 if (batchSize > 0) {
+                    Ingredient ingredient = ri.getIngredient();
                     if (ri.getUnit() != null && ri.getUnit().equals("%") && ri.getQuantity() != null) {
                         double grams = QuantityCalculator.calculateGramsFromPercentage(ri.getQuantity(), batchSize);
                         return new javafx.beans.property.SimpleStringProperty(QuantityCalculator.formatGrams(grams));
                     } else if (ri.getPulseDuration() != null) {
-                        double grams = QuantityCalculator.calculateGramsFromDuration(ri.getPulseDuration());
+                        double grams = calculateGramsFromDurationWithConfig(ri.getPulseDuration(), ingredient);
                         return new javafx.beans.property.SimpleStringProperty(QuantityCalculator.formatGrams(grams));
                     }
                 }
@@ -570,14 +571,15 @@ public class RecipesView extends VBox {
         durationBox.setAlignment(Pos.CENTER_LEFT);
         
         // Batch info
-        Label batchInfoLabel = new Label(String.format("Batch Size: %dg | Conversion: 1g = 20ms", batchSize));
+        Label batchInfoLabel = new Label(String.format("Batch Size: %dg | Conversion: 1g = ms/g (configured per ingredient)", batchSize));
         batchInfoLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666; -fx-font-style: italic;");
         
         // Auto-calculation when percentage changes
         percentageField.textProperty().addListener((obs, oldVal, newVal) -> {
             try {
                 double percent = Double.parseDouble(newVal);
-                int duration = QuantityCalculator.calculateDurationFromPercentage(percent, batchSize);
+                Ingredient selected = selectedIngredient[0];
+                int duration = calculateDurationFromPercentageWithConfig(percent, batchSize, selected);
                 double grams = QuantityCalculator.calculateGramsFromPercentage(percent, batchSize);
                 percentageCalcLabel.setText(String.format("→ %.2fg = %dms", grams, duration));
                 percentageCalcLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #4CAF50; -fx-font-weight: bold;");
@@ -595,8 +597,9 @@ public class RecipesView extends VBox {
                 }
                 double durationValue = Double.parseDouble(newVal);
                 int duration = (int) Math.round(durationValue);
-                double grams = QuantityCalculator.calculateGramsFromDuration(duration);
-                double percent = QuantityCalculator.calculatePercentageFromDuration(duration, batchSize);
+                Ingredient selected = selectedIngredient[0];
+                double grams = calculateGramsFromDurationWithConfig(duration, selected);
+                double percent = calculatePercentageFromDurationWithConfig(duration, batchSize, selected);
                 durationCalcLabel.setText(String.format("= %.2fg (%.2f%%)", grams, percent));
             } catch (Exception e) {
                 durationCalcLabel.setText("");
@@ -671,8 +674,8 @@ public class RecipesView extends VBox {
                             showAlert(Alert.AlertType.ERROR, "Validation Error", "Percentage must be between 0 and 100!");
                             return;
                         }
-                        // Calculate duration from percentage
-                        duration = QuantityCalculator.calculateDurationFromPercentage(percentage, batchSize);
+                        // Calculate duration from percentage using ingredient's msPerGram
+                        duration = calculateDurationFromPercentageWithConfig(percentage, batchSize, selected);
                     } else {
                         // Manual duration mode
                         if (durationField.getText() == null || durationField.getText().trim().isEmpty()) {
@@ -690,8 +693,8 @@ public class RecipesView extends VBox {
                             showAlert(Alert.AlertType.ERROR, "Validation Error", "Duration must be positive!");
                             return;
                         }
-                        // Calculate percentage from duration for storage
-                        percentage = QuantityCalculator.calculatePercentageFromDuration(duration, batchSize);
+                        // Calculate percentage from duration using ingredient's msPerGram
+                        percentage = calculatePercentageFromDurationWithConfig(duration, batchSize, selected);
                     }
                     
                     // Create recipe ingredient
@@ -1407,12 +1410,12 @@ public class RecipesView extends VBox {
             if (pdfIng.getPercentage() != null) {
                 // Use percentage from PDF
                 percentage = pdfIng.getPercentage();
-                duration = QuantityCalculator.calculateDurationFromPercentage(percentage, batchSize);
+                duration = calculateDurationFromPercentageWithConfig(percentage, batchSize, dbIng);
             } else {
                 // Use default duration
                 duration = defaultDuration;
-                // Calculate percentage from default duration
-                percentage = QuantityCalculator.calculatePercentageFromDuration(duration, batchSize);
+                // Calculate percentage from default duration using ingredient's msPerGram
+                percentage = calculatePercentageFromDurationWithConfig(duration, batchSize, dbIng);
             }
             
             RecipeIngredient ri = RecipeIngredient.builder()
@@ -3163,6 +3166,112 @@ public class RecipesView extends VBox {
     
     public void setSerialManager(ro.marcman.mixer.serial.SerialManager serialManager) {
         this.serialManager = serialManager;
+    }
+    
+    /**
+     * Calculează gramele din durată folosind msPerGram configurat pentru ingredient
+     * Ține cont de threshold și de pompa care va fi folosită
+     */
+    private double calculateGramsFromDurationWithConfig(int durationMs, Ingredient ingredient) {
+        if (ingredient == null || durationMs <= 0) {
+            return QuantityCalculator.calculateGramsFromDuration(durationMs);
+        }
+        
+        Double threshold = ingredient.getPumpThresholdGrams();
+        if (threshold == null || threshold <= 0) {
+            threshold = 10.0;
+        }
+        
+        int defaultMsPerGram = QuantityCalculator.MS_PER_GRAM;
+        
+        Integer configuredMsLarge = ingredient.getMsPerGramLarge();
+        Integer configuredMsSmall = ingredient.getMsPerGramSmall();
+        
+        int msLarge = (configuredMsLarge != null && configuredMsLarge > 0) ? configuredMsLarge : defaultMsPerGram;
+        int msSmall = (configuredMsSmall != null && configuredMsSmall > 0) ? configuredMsSmall : defaultMsPerGram;
+        
+        boolean hasLargePin = ingredient.getArduinoPin() != null;
+        boolean hasSmallPin = ingredient.getArduinoPinSmall() != null;
+        
+        // Calculează gramele pentru fiecare pompă folosind msPerGram configurat
+        double gramsIfLarge = hasLargePin ? durationMs / (double) msLarge : Double.POSITIVE_INFINITY;
+        double gramsIfSmall = hasSmallPin ? durationMs / (double) msSmall : Double.POSITIVE_INFINITY;
+        
+        // Determină care pompă va fi folosită bazat pe threshold
+        if (hasSmallPin && gramsIfSmall < threshold) {
+            // Va folosi pompa MICĂ
+            return gramsIfSmall;
+        } else if (hasLargePin) {
+            // Va folosi pompa MARE
+            return (gramsIfLarge == Double.POSITIVE_INFINITY) ? durationMs / (double) msLarge : gramsIfLarge;
+        } else if (hasSmallPin) {
+            // Fallback la pompa MICĂ dacă MARE nu este disponibilă
+            return gramsIfSmall;
+        } else {
+            // Nici o pompă configurată, folosește default
+            return durationMs / (double) defaultMsPerGram;
+        }
+    }
+    
+    /**
+     * Calculează durata din grame folosind msPerGram configurat pentru ingredient
+     * Ține cont de threshold și de pompa care va fi folosită
+     */
+    private int calculateDurationFromGramsWithConfig(double grams, Ingredient ingredient) {
+        if (ingredient == null || grams <= 0) {
+            return QuantityCalculator.calculateDurationFromGrams(grams);
+        }
+        
+        Double threshold = ingredient.getPumpThresholdGrams();
+        if (threshold == null || threshold <= 0) {
+            threshold = 10.0;
+        }
+        
+        int defaultMsPerGram = QuantityCalculator.MS_PER_GRAM;
+        
+        Integer configuredMsLarge = ingredient.getMsPerGramLarge();
+        Integer configuredMsSmall = ingredient.getMsPerGramSmall();
+        
+        int msLarge = (configuredMsLarge != null && configuredMsLarge > 0) ? configuredMsLarge : defaultMsPerGram;
+        int msSmall = (configuredMsSmall != null && configuredMsSmall > 0) ? configuredMsSmall : defaultMsPerGram;
+        
+        boolean hasLargePin = ingredient.getArduinoPin() != null;
+        boolean hasSmallPin = ingredient.getArduinoPinSmall() != null;
+        
+        // Determină care pompă va fi folosită bazat pe threshold și disponibilitatea pin-urilor
+        int msPerGram;
+        if (hasSmallPin && grams < threshold) {
+            // Va folosi pompa MICĂ
+            msPerGram = msSmall;
+        } else if (hasLargePin) {
+            // Va folosi pompa MARE
+            msPerGram = msLarge;
+        } else if (hasSmallPin) {
+            // Fallback la pompa MICĂ dacă MARE nu este disponibilă
+            msPerGram = msSmall;
+        } else {
+            // Nici o pompă configurată, folosește default
+            msPerGram = defaultMsPerGram;
+        }
+        
+        // Calculează durata folosind msPerGram configurat: durata = grame * msPerGram
+        return (int) Math.round(grams * msPerGram);
+    }
+    
+    /**
+     * Calculează durata din procente folosind msPerGram configurat pentru ingredient
+     */
+    private int calculateDurationFromPercentageWithConfig(double percentage, int batchSize, Ingredient ingredient) {
+        double grams = QuantityCalculator.calculateGramsFromPercentage(percentage, batchSize);
+        return calculateDurationFromGramsWithConfig(grams, ingredient);
+    }
+    
+    /**
+     * Calculează procentul din durată folosind msPerGram configurat pentru ingredient
+     */
+    private double calculatePercentageFromDurationWithConfig(int durationMs, int batchSize, Ingredient ingredient) {
+        double grams = calculateGramsFromDurationWithConfig(durationMs, ingredient);
+        return QuantityCalculator.calculatePercentageFromGrams(grams, batchSize);
     }
 }
 

@@ -245,33 +245,21 @@ public class MixControlView extends VBox {
             
             // Calculate which pump will be used based on current batch size and duration
             String selectedPump = "";
+            double scaleFactor = 1.0;
+            int originalBatchSize = 100;
             if (ri.getPulseDuration() != null && batchSizeSpinner != null && recipeCombo.getValue() != null) {
                 int desiredBatchSize = batchSizeSpinner.getValue();
-                int originalBatchSize = recipeCombo.getValue().getBatchSize() != null ? 
+                originalBatchSize = recipeCombo.getValue().getBatchSize() != null ?
                     recipeCombo.getValue().getBatchSize() : 100;
-                double scaleFactor = (double) desiredBatchSize / originalBatchSize;
-                
-                // Calculate grams for this ingredient using configured msPerGram
-                double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ing);
-                double scaledGrams = baseGrams * scaleFactor;
-                
-                // Determine which pump will be used (same logic as execution)
-                Double threshold = ing.getPumpThresholdGrams() != null ? 
-                    ing.getPumpThresholdGrams() : 10.0;
-                
-                if (scaledGrams < threshold) {
-                    // Will use SMALL pump
-                    if (pinSmall != null) {
-                        selectedPump = "Small";
-                    } else if (pinLarge != null) {
-                        selectedPump = "Large (fallback)";
-                    }
-                } else {
-                    // Will use LARGE pump
-                    if (pinLarge != null) {
-                        selectedPump = "Large";
-                    }
-                }
+                scaleFactor = (double) desiredBatchSize / originalBatchSize;
+            }
+            PumpComputationResult pumpResult = computePumpResult(ri, ing, scaleFactor, originalBatchSize);
+            if (pumpResult.pumpType == PumpType.SMALL) {
+                selectedPump = "Small";
+            } else if (pumpResult.pumpType == PumpType.LARGE) {
+                selectedPump = "Large";
+            } else if (pumpResult.pumpType == PumpType.DEFAULT) {
+                selectedPump = "Default";
             }
             
             // Build display string
@@ -303,7 +291,13 @@ public class MixControlView extends VBox {
             
             // Add selected pump info if determined
             if (!selectedPump.isEmpty()) {
+                String msInfo = pumpResult.msPerGram != null
+                    ? pumpResult.msPerGram + " ms/g" + (pumpResult.usesDefaultMs ? " (default)" : "")
+                    : "";
                 display.append(" → ").append(selectedPump);
+                if (!msInfo.isEmpty()) {
+                    display.append(" [").append(msInfo).append("]");
+                }
             }
             
             return new javafx.beans.property.SimpleStringProperty(display.toString());
@@ -318,19 +312,18 @@ public class MixControlView extends VBox {
             }
             
             // Calculate scaled duration based on current batch size
+            double scaleFactor = 1.0;
             if (batchSizeSpinner != null && recipeCombo.getValue() != null) {
                 int desiredBatchSize = batchSizeSpinner.getValue();
-                int originalBatchSize = recipeCombo.getValue().getBatchSize() != null ? 
+                int originalBatchSize = recipeCombo.getValue().getBatchSize() != null ?
                     recipeCombo.getValue().getBatchSize() : 100;
-                double scaleFactor = (double) desiredBatchSize / originalBatchSize;
-                double scaledDuration = ri.getPulseDuration() * scaleFactor;
-                return new javafx.beans.property.SimpleStringProperty(
-                    String.format("%.2f", scaledDuration));
-            } else {
-                // If batch size not available, show original duration with 2 decimals
-                return new javafx.beans.property.SimpleStringProperty(
-                    String.format("%.2f", (double) ri.getPulseDuration()));
+                scaleFactor = (double) desiredBatchSize / originalBatchSize;
             }
+            int originalBatchSizeForFormula = recipeCombo.getValue() != null && recipeCombo.getValue().getBatchSize() != null ?
+                recipeCombo.getValue().getBatchSize() : 100;
+            PumpComputationResult result = computePumpResult(ri, ri.getIngredient(), scaleFactor, originalBatchSizeForFormula);
+            return new javafx.beans.property.SimpleStringProperty(
+                String.format("%.3f", result.scaledDurationExactMs));
         });
         durationCol.setPrefWidth(120);
         
@@ -349,70 +342,52 @@ public class MixControlView extends VBox {
             }
             
             // Calculate scaled duration and grams based on current batch size
+            double scaleFactor = 1.0;
             if (batchSizeSpinner != null && recipeCombo.getValue() != null) {
                 int desiredBatchSize = batchSizeSpinner.getValue();
-                int originalBatchSize = recipeCombo.getValue().getBatchSize() != null ? 
+                int originalBatchSize = recipeCombo.getValue().getBatchSize() != null ?
                     recipeCombo.getValue().getBatchSize() : 100;
-                double scaleFactor = (double) desiredBatchSize / originalBatchSize;
-                
-                // Calculate scaled duration and grams using ingredient's msPerGram configuration
-                double scaledDuration = ri.getPulseDuration() * scaleFactor;
-                Ingredient ing = ri.getIngredient();
-                
-                // First calculate base grams using configured msPerGram
-                double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ing);
-                double scaledGrams = baseGrams * scaleFactor;
-                
-                // Now recalculate with scaled duration to get correct ms/g for scaled values
-                // Determine which pump will be used for scaled quantity
-                Double threshold = (ing != null && ing.getPumpThresholdGrams() != null) ? 
-                    ing.getPumpThresholdGrams() : 10.0;
-                
-                Integer msPerGram = null;
-                if (scaledGrams < threshold && ing != null) {
-                    // Will use SMALL pump
-                    msPerGram = ing.getMsPerGramSmall();
-                    if (msPerGram == null) {
-                        msPerGram = ing.getMsPerGramLarge(); // Fallback to Large
-                    }
-                } else if (ing != null) {
-                    // Will use LARGE pump
-                    msPerGram = ing.getMsPerGramLarge();
-                }
-                
-                // Recalculate grams using configured msPerGram and scaled duration
-                if (msPerGram != null && msPerGram > 0) {
-                    scaledGrams = scaledDuration / (double) msPerGram;
-                }
-                
-                // Build formula: "duration ms / grams g = ms/g"
-                if (scaledGrams > 0.0001) { // Use small threshold instead of > 0
-                    double calculatedMsPerGram = scaledDuration / scaledGrams;
-                    String formula = String.format("%.2f ms / %.2f g = %.2f ms/g", 
-                        scaledDuration, scaledGrams, calculatedMsPerGram);
-                    return new javafx.beans.property.SimpleStringProperty(formula);
-                } else if (scaledDuration > 0) {
-                    // Duration exists but grams are too small
-                    String formula = String.format("%.2f ms / %.4f g = N/A", 
-                        scaledDuration, scaledGrams);
-                    return new javafx.beans.property.SimpleStringProperty(formula);
-                }
+                scaleFactor = (double) desiredBatchSize / originalBatchSize;
             }
             
-            // Fallback: calculate from original duration using ingredient's msPerGram
-            Ingredient ing = ri.getIngredient();
-            double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ing);
+            int originalBatchSizeForFormula = recipeCombo.getValue() != null && recipeCombo.getValue().getBatchSize() != null ?
+                recipeCombo.getValue().getBatchSize() : 100;
+            PumpComputationResult result = computePumpResult(ri, ri.getIngredient(), scaleFactor, originalBatchSizeForFormula);
+            double durationMs = result.scaledDurationExactMs;
             
-            if (baseGrams > 0.0001) { // Use small threshold instead of > 0
-                double msPerGram = (double) ri.getPulseDuration() / baseGrams;
-                String formula = String.format("%.2f ms / %.2f g = %.2f ms/g", 
-                    (double) ri.getPulseDuration(), baseGrams, msPerGram);
-                return new javafx.beans.property.SimpleStringProperty(formula);
-            } else if (ri.getPulseDuration() > 0) {
-                // Duration exists but grams are too small
-                String formula = String.format("%.2f ms / %.4f g = N/A", 
-                    (double) ri.getPulseDuration(), baseGrams);
-                return new javafx.beans.property.SimpleStringProperty(formula);
+            if (result.msPerGram != null && result.msPerGram > 0) {
+                // Formula corectă: grame = durata ms / ms_per_gram ms/g
+                // ms_per_gram este variabila de calibrare (câți ms pentru 1 gram)
+                double gramsDisplay = durationMs / result.msPerGram;
+                if (gramsDisplay > 0.000001) {
+                    String formula = String.format("%.3f g = %.3f ms ÷ %d ms/g",
+                        gramsDisplay,
+                        durationMs,
+                        result.msPerGram);
+                    return new javafx.beans.property.SimpleStringProperty(formula);
+                } else {
+                    String formula = String.format("%.6f g = %.3f ms ÷ %d ms/g",
+                        gramsDisplay,
+                        durationMs,
+                        result.msPerGram);
+                    return new javafx.beans.property.SimpleStringProperty(formula);
+                }
+            } else {
+                // Fallback când ms/g nu este configurat
+                double gramsDisplay = result.grams;
+                if (gramsDisplay > 0.000001) {
+                    double msPerGramCalculated = durationMs / gramsDisplay;
+                    String formula = String.format("%.3f g = %.3f ms ÷ %.3f ms/g (calculat)",
+                        gramsDisplay,
+                        durationMs,
+                        msPerGramCalculated);
+                    return new javafx.beans.property.SimpleStringProperty(formula);
+                } else if (durationMs > 0) {
+                    String formula = String.format("%.6f g = %.3f ms ÷ N/A ms/g",
+                        gramsDisplay,
+                        durationMs);
+                    return new javafx.beans.property.SimpleStringProperty(formula);
+                }
             }
             
             return new javafx.beans.property.SimpleStringProperty("Durata neconfigurată");
@@ -685,7 +660,7 @@ public class MixControlView extends VBox {
                     });
                     
                     // Execute ingredient with scaled duration via batch protocol
-                    boolean stepOk = executeIngredient(ri, currentStep, totalSteps, scaleFactor);
+                    boolean stepOk = executeIngredient(ri, currentStep, totalSteps, scaleFactor, originalBatchSize);
                     if (!stepOk) {
                         Platform.runLater(() -> {
                             statusLabel.setText(String.format("Step %d FAILED - execution halted", currentStep));
@@ -736,84 +711,68 @@ public class MixControlView extends VBox {
         }).start();
     }
     
-    private boolean executeIngredient(RecipeIngredient ri, int step, int total, double scaleFactor) {
+    private boolean executeIngredient(RecipeIngredient ri, int step, int total, double scaleFactor, int originalBatchSize) {
         String ingredientName = ri.getDisplayName();
-        
         log(String.format("\n[Step %d/%d] %s", step, total, ingredientName));
         
-        String slaveUid = ri.getSlaveUid();
-        Integer pinLarge = ri.getArduinoPin();
-        Integer pinSmall = ri.getIngredient() != null ? ri.getIngredient().getArduinoPinSmall() : null;
-        Integer baseDuration = ri.getPulseDuration();
-        
-        log("  SLAVE: " + (slaveUid != null ? slaveUid : "N/A"));
-        
-        if (slaveUid == null || baseDuration == null) {
-            log("  ERROR: Ingredient not properly configured!");
+        Ingredient ingredient = ri.getIngredient();
+        if (ingredient == null) {
+            log("  ERROR: Ingredient details not loaded. Please refresh Ingredients tab.");
+            return false;
+        }
+        if (ri.getPulseDuration() == null) {
+            log("  ERROR: Pulse duration missing for ingredient.");
             return false;
         }
         
-        // Scale duration based on desired batch size
-        int scaledDuration = (int) Math.round(baseDuration * scaleFactor);
+        PumpComputationResult baseResult = computePumpResult(ri, ingredient, 1.0, originalBatchSize);
+        PumpComputationResult scaledResult = computePumpResult(ri, ingredient, scaleFactor, originalBatchSize);
         
-        // Calculate grams using ingredient's msPerGram configuration
-        RecipeIngredient tempRi = RecipeIngredient.builder()
-            .pulseDuration(baseDuration)
-            .ingredient(ri.getIngredient())
-            .build();
-        double baseGrams = calculateBaseGramsFromDurationWithConfig(tempRi, ri.getIngredient());
-        double scaledGrams = baseGrams * scaleFactor;
+        log(String.format("  Base Duration: %d ms (%.3f g)", ri.getPulseDuration(), baseResult.grams));
+        log(String.format("  Scaled Duration: %d ms (%.3f g) [scale: %.3f]",
+            scaledResult.scaledDurationRoundedMs, scaledResult.grams, scaleFactor));
         
-        log(String.format("  Base Duration: %d ms (%.2f g)", baseDuration, baseGrams));
-        log(String.format("  Scaled Duration: %d ms (%.2f g) [scale: %.2f]", scaledDuration, scaledGrams, scaleFactor));
+        String pumpLabel;
+        switch (scaledResult.pumpType) {
+            case SMALL:
+                pumpLabel = "SMALL";
+                break;
+            case LARGE:
+                pumpLabel = "LARGE";
+                break;
+            default:
+                pumpLabel = "DEFAULT";
+                break;
+        }
         
-        // ⚠️ DUAL PUMP SELECTION: Choose pump based on quantity
-        Integer selectedPin = null;
-        String pumpType = "";
-        
-        // Get threshold from ingredient configuration
-        Double threshold = ri.getIngredient() != null && ri.getIngredient().getPumpThresholdGrams() != null ?
-            ri.getIngredient().getPumpThresholdGrams() : 10.0;
-        
-        if (scaledGrams < threshold) {
-            // Use SMALL pump for quantities below threshold
-            if (pinSmall != null) {
-                selectedPin = pinSmall;
-                pumpType = "SMALL";
-                log(String.format("  🔸 AUTO-SELECT: SMALL pump (quantity %.2f g < %.2f g threshold)", scaledGrams, threshold));
-            } else if (pinLarge != null) {
-                // Fallback to large pump if small not configured
-                selectedPin = pinLarge;
-                pumpType = "LARGE (fallback)";
-                log(String.format("  ⚠️ WARNING: SMALL pump not configured, using LARGE pump for %.2f g", scaledGrams));
-            } else {
-                log("  ERROR: No pump configured for this ingredient!");
-                return false;
-            }
+        if (scaledResult.msPerGram != null) {
+            log(String.format("  Pump selection: %s (ms/g = %d%s)",
+                pumpLabel,
+                scaledResult.msPerGram,
+                scaledResult.usesDefaultMs ? ", default" : ""));
         } else {
-            // Use LARGE pump for quantities >= 10g
-            if (pinLarge != null) {
-                selectedPin = pinLarge;
-                pumpType = "LARGE";
-                log(String.format("  🔹 AUTO-SELECT: LARGE pump (quantity %.2f g >= 10g)", scaledGrams));
-            } else {
-                log("  ERROR: LARGE pump not configured!");
-                return false;
-            }
+            log(String.format("  Pump selection: %s", pumpLabel));
         }
         
-        String pinDisplay = "N/A";
-        if (selectedPin != null) {
-            pinDisplay = (selectedPin >= 54 && selectedPin <= 69) ? "A" + (selectedPin - 54) : String.valueOf(selectedPin);
+        if (scaledResult.selectedPin == null || scaledResult.selectedUid == null) {
+            log("  ERROR: Pump pin/UID not configured for the selected pump.");
+            return false;
         }
-        log(String.format("  PIN: %s (%d) - %s PUMP", pinDisplay, selectedPin, pumpType));
         
-        if (scaledDuration <= 0) {
+        if (scaledResult.scaledDurationRoundedMs <= 0) {
             log("  WARNING: Scaled duration <= 0ms. Skipping command.");
             return true;
         }
         
-        String uidFormatted = normalizeUid(slaveUid);
+        String pinDisplay = (scaledResult.selectedPin >= 54 && scaledResult.selectedPin <= 69)
+            ? "A" + (scaledResult.selectedPin - 54)
+            : String.valueOf(scaledResult.selectedPin);
+        log(String.format("  PIN: %s (%d)", pinDisplay, scaledResult.selectedPin));
+        log(String.format("  Calculated quantity: %.3f g", scaledResult.grams));
+        
+        String uidFormatted = normalizeUid(scaledResult.selectedUid);
+        log(String.format("  SLAVE UID: %s", uidFormatted));
+        int scaledDuration = scaledResult.scaledDurationRoundedMs;
         int remaining = scaledDuration;
         int partIndex = 1;
         int totalParts = (int) Math.ceil((double) scaledDuration / MAX_DURATION_PER_COMMAND);
@@ -821,7 +780,7 @@ public class MixControlView extends VBox {
         while (remaining > 0 && executing) {
             int chunkDuration = Math.min(remaining, MAX_DURATION_PER_COMMAND);
             String suffix = totalParts > 1 ? String.format(" (part %d/%d)", partIndex, totalParts) : "";
-            String batchPrepCommand = String.format("batchprep %s %d:%d", uidFormatted, selectedPin, chunkDuration);
+            String batchPrepCommand = String.format("batchprep %s %d:%d", uidFormatted, scaledResult.selectedPin, chunkDuration);
             
             log(String.format("  [BATCH] PREPARE%s -> %s", suffix, batchPrepCommand));
             boolean prepSent = serialManager.sendRawCommand(batchPrepCommand);
@@ -948,19 +907,24 @@ public class MixControlView extends VBox {
                 
                 // Helper class to store command data
                 class CommandData {
-                    RecipeIngredient ingredient;
                     String slaveUid;
                     int pin;
                     int duration;
                     String ingredientName;
+                    PumpType pumpType;
+                    int msPerGram;
+                    boolean usesDefaultMs;
                     
-                    CommandData(RecipeIngredient ri, String uid, int p, int d, String name) {
-                        ingredient = ri;
-                        slaveUid = uid;
-                        pin = p;
-                        duration = d;
-                        ingredientName = name;
+                    CommandData(String uid, int p, int d, String name, PumpType pumpType, int msPerGram, boolean usesDefaultMs) {
+                        this.slaveUid = uid;
+                        this.pin = p;
+                        this.duration = d;
+                        this.ingredientName = name;
+                        this.pumpType = pumpType;
+                        this.msPerGram = msPerGram;
+                        this.usesDefaultMs = usesDefaultMs;
                     }
+                    
                 }
                 
                 // Step 1: Prepare all commands and group by UID
@@ -970,57 +934,51 @@ public class MixControlView extends VBox {
                     if (!executing) break;
                     
                     String ingredientName = ri.getDisplayName();
-                    String slaveUid = ri.getSlaveUid();
-                    Integer pinLarge = ri.getArduinoPin();
-                    Integer pinSmall = ri.getIngredient() != null ? ri.getIngredient().getArduinoPinSmall() : null;
-                    Integer baseDuration = ri.getPulseDuration();
-                    
-                    if (slaveUid == null || baseDuration == null) {
+                    Ingredient ingredient = ri.getIngredient();
+                    if (ingredient == null || ri.getPulseDuration() == null) {
                         log(String.format("⚠️ SKIP: %s (not configured)", ingredientName));
                         continue;
                     }
                     
-                    // Scale duration
-                    int scaledDuration = (int) Math.round(baseDuration * scaleFactor);
+                    PumpComputationResult result = computePumpResult(ri, ingredient, scaleFactor, originalBatchSize);
                     
-                    // Calculate grams for pump selection
-                    RecipeIngredient tempRi = RecipeIngredient.builder()
-                        .pulseDuration(baseDuration)
-                        .ingredient(ri.getIngredient())
-                        .build();
-                    double baseGrams = calculateBaseGramsFromDurationWithConfig(tempRi, ri.getIngredient());
-                    double scaledGrams = baseGrams * scaleFactor;
-                    
-                    // Select pump based on quantity
-                    Integer selectedPin = null;
-                    Double threshold = ri.getIngredient() != null && ri.getIngredient().getPumpThresholdGrams() != null ?
-                        ri.getIngredient().getPumpThresholdGrams() : 10.0;
-                    
-                    if (scaledGrams < threshold) {
-                        selectedPin = pinSmall != null ? pinSmall : pinLarge;
-                    } else {
-                        selectedPin = pinLarge;
-                    }
-                    
-                    if (selectedPin == null) {
+                    if (result.selectedUid == null || result.selectedPin == null) {
                         log(String.format("⚠️ SKIP: %s (no pump configured)", ingredientName));
                         continue;
                     }
                     
-                    if (scaledDuration <= 0) {
+                    if (result.scaledDurationRoundedMs <= 0) {
                         log(String.format("⚠️ SKIP: %s (scaled duration <= 0)", ingredientName));
                         continue;
                     }
                     
-                    int remaining = scaledDuration;
+                    String normalizedUid = normalizeUid(result.selectedUid);
+                    log(String.format("• %s -> UID %s, PIN %d, %d ms, %.3f g (%s%s)",
+                        ingredientName,
+                        normalizedUid,
+                        result.selectedPin,
+                        result.scaledDurationRoundedMs,
+                        result.grams,
+                        result.pumpType,
+                        result.usesDefaultMs ? ", default ms/g" : ""));
+                    
+                    int remaining = result.scaledDurationRoundedMs;
                     int partIndex = 1;
-                    int totalParts = (int) Math.ceil((double) scaledDuration / MAX_DURATION_PER_COMMAND);
+                    int totalParts = (int) Math.ceil((double) result.scaledDurationRoundedMs / MAX_DURATION_PER_COMMAND);
                     while (remaining > 0) {
                         int chunkDuration = Math.min(remaining, MAX_DURATION_PER_COMMAND);
                         String namePart = totalParts > 1
                             ? String.format("%s [part %d/%d]", ingredientName, partIndex, totalParts)
                             : ingredientName;
-                        allCommands.add(new CommandData(ri, slaveUid, selectedPin, chunkDuration, namePart));
+                        allCommands.add(new CommandData(
+                            normalizedUid,
+                            result.selectedPin,
+                            chunkDuration,
+                            namePart,
+                            result.pumpType,
+                            result.msPerGram != null ? result.msPerGram : ro.marcman.mixer.core.services.QuantityCalculator.MS_PER_GRAM,
+                            result.usesDefaultMs
+                        ));
                         remaining -= chunkDuration;
                         partIndex++;
                     }
@@ -1073,7 +1031,16 @@ public class MixControlView extends VBox {
                             if (cmd.duration > maxDuration) {
                                 maxDuration = cmd.duration;
                             }
-                            log(String.format("    - %s: PIN %d, %d ms", cmd.ingredientName, cmd.pin, cmd.duration));
+                            String pumpInfo = switch (cmd.pumpType) {
+                                case SMALL -> "Small";
+                                case LARGE -> "Large";
+                                default -> "Default";
+                            };
+                            if (cmd.usesDefaultMs) {
+                                pumpInfo += " (default)";
+                            }
+                            log(String.format("    - %s: PIN %d, %d ms [%s, %d ms/g]",
+                                cmd.ingredientName, cmd.pin, cmd.duration, pumpInfo, cmd.msPerGram));
                         }
 
                         // Send batch preparation command
@@ -1202,28 +1169,41 @@ public class MixControlView extends VBox {
         int originalBatchSize = recipe.getBatchSize() != null ? recipe.getBatchSize() : 100;
         double scaleFactor = (double) desiredBatchSize / originalBatchSize;
         
-        Map<String, List<Integer>> durationsByUid = new HashMap<>();
+        long maxParallelDuration = 0;
         int segmentCount = 0;
         
         for (RecipeIngredient ri : ingredientsToConsider) {
-            Integer baseDuration = ri.getPulseDuration();
-            String uid = ri.getSlaveUid();
-            if (baseDuration == null || uid == null) {
+            Ingredient ingredient = ri.getIngredient();
+            if (ingredient == null) {
+                // Try to load ingredient from database
+                ingredient = ingredientRepository.findById(ri.getIngredientId()).orElse(null);
+            }
+            
+            // Calculate duration using computePumpResult to get correct duration based on scaled grams and msPerGram
+            PumpComputationResult result = computePumpResult(ri, ingredient, scaleFactor, originalBatchSize);
+            
+            if (result.scaledDurationRoundedMs <= 0) {
                 continue;
             }
-            int scaled = (int) Math.round(baseDuration * scaleFactor);
+            
+            int scaled = result.scaledDurationRoundedMs;
             if (scaled < 0) {
                 scaled = 0;
             }
             if (scaled == 0) continue;
 
+            // Pentru SEQUENTIAL: adună toate duratele
             int remaining = scaled;
             while (remaining > 0) {
                 int chunk = Math.min(remaining, MAX_DURATION_PER_COMMAND);
                 estimates.sequentialMs += chunk;
-                durationsByUid.computeIfAbsent(uid, k -> new ArrayList<>()).add(chunk);
                 remaining -= chunk;
                 segmentCount++;
+            }
+            
+            // Pentru PARALEL: găsește ingredientul cu timpul de execuție cel mai mare
+            if (scaled > maxParallelDuration) {
+                maxParallelDuration = scaled;
             }
         }
 
@@ -1231,38 +1211,28 @@ public class MixControlView extends VBox {
             estimates.sequentialMs += (long) segmentCount * 200L;
         }
 
-        long maxParallel = 0;
-        for (List<Integer> durations : durationsByUid.values()) {
-            if (durations.isEmpty()) {
-                continue;
-            }
-            long uidTotal = 0;
-            for (int i = 0; i < durations.size(); i += MAX_BATCH_SIZE) {
-                int end = Math.min(i + MAX_BATCH_SIZE, durations.size());
-                int batchMax = durations.subList(i, end).stream()
-                    .mapToInt(Integer::intValue)
-                    .max()
-                    .orElse(0);
-                uidTotal += batchMax;
-            }
-            maxParallel = Math.max(maxParallel, uidTotal);
-        }
-        estimates.parallelMs = maxParallel;
+        // PARALEL: timpul ingredientului cu durata cea mai mare
+        estimates.parallelMs = maxParallelDuration;
         return estimates;
     }
     
     private String formatDuration(long ms) {
-        if (ms <= 0) return "0 s";
-        double seconds = ms / 1000.0;
-        if (seconds < 60) {
-            return String.format("%.1f s", seconds);
+        if (ms <= 0) return "0 ms";
+        
+        // Afișează în ms dacă este sub 1 secundă
+        if (ms < 1000) {
+            return String.format("%d ms", ms);
         }
-        double minutes = seconds / 60.0;
-        if (minutes < 60) {
-            return String.format("%.1f min", minutes);
-        }
-        double hours = minutes / 60.0;
-        return String.format("%.2f h", hours);
+        
+        // Calculează ore, minute și secunde
+        double totalSeconds = ms / 1000.0;
+        long hours = (long) (totalSeconds / 3600);
+        double remainingAfterHours = totalSeconds - (hours * 3600);
+        long minutes = (long) (remainingAfterHours / 60);
+        double seconds = remainingAfterHours - (minutes * 60);
+        
+        // Format: ore : minute : secunde (cu zecimale pentru secunde)
+        return String.format("%d : %02d : %.3f", hours, minutes, seconds);
     }
 
     private void log(String message) {
@@ -1317,8 +1287,8 @@ public class MixControlView extends VBox {
                 }
                 
                 // Calculate required grams for this ingredient (scaled) using msPerGram configuration
-                double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ingredient);
-                double requiredGrams = baseGrams * scaleFactor;
+                PumpComputationResult computation = computePumpResult(ri, ingredient, scaleFactor, originalBatchSize);
+                double requiredGrams = computation.grams;
                 
                 double availableStock = ingredient.getStockQuantity() != null ? ingredient.getStockQuantity() : 0.0;
                 
@@ -1364,8 +1334,8 @@ public class MixControlView extends VBox {
                 }
                 
                 // Calculate consumed grams (scaled) using msPerGram configuration
-                double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ingredient);
-                double consumedGrams = baseGrams * scaleFactor;
+                PumpComputationResult computation = computePumpResult(ri, ingredient, scaleFactor, originalBatchSize);
+                double consumedGrams = computation.grams;
                 
                 double currentStock = ingredient.getStockQuantity() != null ? ingredient.getStockQuantity() : 0.0;
                 double newStock = currentStock - consumedGrams;
@@ -1628,76 +1598,160 @@ public class MixControlView extends VBox {
             .collect(Collectors.toList());
     }
     
+    private enum PumpType {
+        SMALL,
+        LARGE,
+        DEFAULT
+    }
+    
+    private static class PumpComputationResult {
+        private final PumpType pumpType;
+        private final Integer msPerGram;
+        private final Integer selectedPin;
+        private final String selectedUid;
+        private final double grams;
+        private final boolean usesDefaultMs;
+        private final int scaledDurationRoundedMs;
+        private final double scaledDurationExactMs;
+        
+        private PumpComputationResult(
+            PumpType pumpType,
+            Integer msPerGram,
+            Integer selectedPin,
+            String selectedUid,
+            double grams,
+            boolean usesDefaultMs,
+            int scaledDurationRoundedMs,
+            double scaledDurationExactMs
+        ) {
+            this.pumpType = pumpType;
+            this.msPerGram = msPerGram;
+            this.selectedPin = selectedPin;
+            this.selectedUid = selectedUid;
+            this.grams = grams;
+            this.usesDefaultMs = usesDefaultMs;
+            this.scaledDurationRoundedMs = scaledDurationRoundedMs;
+            this.scaledDurationExactMs = scaledDurationExactMs;
+        }
+    }
+    
     /**
-     * Calculate grams from duration using ingredient's msPerGram configuration
-     * Uses msPerGramLarge or msPerGramSmall based on calculated grams and threshold
+     * Compute pumping parameters (selected pump, grams, ms/gram) for a recipe ingredient
+     * based on current calibration settings and desired quantity (via scale factor).
      */
-    private double calculateGramsFromDurationWithConfig(RecipeIngredient ri, double scaledGrams, Ingredient ingredient) {
-        if (ingredient == null || ri.getPulseDuration() == null) {
-            // Fallback to default calculation
-            return ro.marcman.mixer.core.services.QuantityCalculator.calculateGramsFromDuration(ri.getPulseDuration());
+    private PumpComputationResult computePumpResult(RecipeIngredient ri, Ingredient ingredient, double scaleFactor, int originalBatchSize) {
+        int defaultMsPerGram = ro.marcman.mixer.core.services.QuantityCalculator.MS_PER_GRAM;
+        
+        // Step 1: Calculate grams from recipe (percentage * batch size)
+        double baseGrams = 0.0;
+        if (ri != null && ri.getQuantity() != null && ri.getUnit() != null && ri.getUnit().equals("%")) {
+            // Calculate grams from percentage: grams = percentage * batchSize / 100
+            baseGrams = (ri.getQuantity() * originalBatchSize) / 100.0;
+        } else if (ri != null && ri.getPulseDuration() != null) {
+            // Fallback: calculate grams from duration using default msPerGram
+            baseGrams = ri.getPulseDuration() / (double) defaultMsPerGram;
         }
         
-        // Determine which pump will be used
-        Double threshold = ingredient.getPumpThresholdGrams() != null ? 
-            ingredient.getPumpThresholdGrams() : 10.0;
+        // Step 2: Scale the grams
+        double scaledGrams = baseGrams * scaleFactor;
         
-        Integer msPerGram = null;
-        if (scaledGrams < threshold) {
-            // Will use SMALL pump
-            msPerGram = ingredient.getMsPerGramSmall();
-            if (msPerGram == null) {
-                msPerGram = ingredient.getMsPerGramLarge(); // Fallback to Large
+        if (ingredient == null || scaledGrams <= 0) {
+            // Fallback to default conversion
+            double scaledDurationExact = scaledGrams * defaultMsPerGram;
+            int scaledDurationRounded = (int) Math.round(scaledDurationExact);
+            if (scaledDurationRounded < 0) {
+                scaledDurationRounded = 0;
             }
+            return new PumpComputationResult(
+                PumpType.DEFAULT,
+                defaultMsPerGram,
+                null,
+                null,
+                scaledGrams,
+                true,
+                scaledDurationRounded,
+                scaledDurationExact
+            );
+        }
+        
+        Double threshold = ingredient.getPumpThresholdGrams();
+        if (threshold == null || threshold <= 0) {
+            threshold = 10.0;
+        }
+        
+        Integer configuredMsLarge = ingredient.getMsPerGramLarge();
+        Integer configuredMsSmall = ingredient.getMsPerGramSmall();
+        
+        int msLarge = (configuredMsLarge != null && configuredMsLarge > 0) ? configuredMsLarge : defaultMsPerGram;
+        int msSmall = (configuredMsSmall != null && configuredMsSmall > 0) ? configuredMsSmall : defaultMsPerGram;
+        
+        boolean hasLargePin = ingredient.getArduinoPin() != null;
+        boolean hasSmallPin = ingredient.getArduinoPinSmall() != null;
+        
+        // Step 3: Determine which pump to use based on threshold and scaled grams
+        PumpType pumpType;
+        Integer selectedPin;
+        String selectedUid;
+        int msPerGramUsed;
+        boolean usesDefaultMs;
+        double grams;
+        
+        if (hasSmallPin && scaledGrams < threshold) {
+            pumpType = PumpType.SMALL;
+            selectedPin = ingredient.getArduinoPinSmall();
+            selectedUid = ingredient.getArduinoUidSmall();
+            msPerGramUsed = msSmall;
+            usesDefaultMs = configuredMsSmall == null || configuredMsSmall <= 0;
+            grams = scaledGrams;
+        } else if (hasLargePin) {
+            pumpType = PumpType.LARGE;
+            selectedPin = ingredient.getArduinoPin();
+            selectedUid = ingredient.getArduinoUid();
+            msPerGramUsed = msLarge;
+            usesDefaultMs = configuredMsLarge == null || configuredMsLarge <= 0;
+            grams = scaledGrams;
+        } else if (hasSmallPin) {
+            // Fallback to small pump if large is not available
+            pumpType = PumpType.SMALL;
+            selectedPin = ingredient.getArduinoPinSmall();
+            selectedUid = ingredient.getArduinoUidSmall();
+            msPerGramUsed = msSmall;
+            usesDefaultMs = configuredMsSmall == null || configuredMsSmall <= 0;
+            grams = scaledGrams;
         } else {
-            // Will use LARGE pump
-            msPerGram = ingredient.getMsPerGramLarge();
+            // No pump configured, fallback to default conversion
+            pumpType = PumpType.DEFAULT;
+            selectedPin = null;
+            selectedUid = null;
+            msPerGramUsed = defaultMsPerGram;
+            usesDefaultMs = true;
+            grams = scaledGrams;
         }
         
-        // If msPerGram is not configured, fallback to default
-        if (msPerGram == null || msPerGram <= 0) {
-            return ro.marcman.mixer.core.services.QuantityCalculator.calculateGramsFromDuration(ri.getPulseDuration());
+        // Step 4: Calculate duration using the selected pump's msPerGram: duration = msPerGram * grams
+        double scaledDurationExact = grams * msPerGramUsed;
+        int scaledDurationRounded = (int) Math.round(scaledDurationExact);
+        if (scaledDurationRounded < 0) {
+            scaledDurationRounded = 0;
         }
         
-        // Calculate grams using configured msPerGram: grams = duration / msPerGram
-        return ri.getPulseDuration() / (double) msPerGram;
+        return new PumpComputationResult(
+            pumpType,
+            msPerGramUsed,
+            selectedPin,
+            selectedUid,
+            grams,
+            usesDefaultMs,
+            scaledDurationRounded,
+            scaledDurationExact
+        );
     }
     
     /**
      * Calculate grams from duration using ingredient's msPerGram configuration (for base duration, no scaling)
      */
-    private double calculateBaseGramsFromDurationWithConfig(RecipeIngredient ri, Ingredient ingredient) {
-        if (ingredient == null || ri.getPulseDuration() == null) {
-            // Fallback to default calculation
-            return ro.marcman.mixer.core.services.QuantityCalculator.calculateGramsFromDuration(ri.getPulseDuration());
-        }
-        
-        // First calculate with default to determine which pump to use
-        double baseGramsDefault = ro.marcman.mixer.core.services.QuantityCalculator.calculateGramsFromDuration(ri.getPulseDuration());
-        
-        // Determine which pump will be used
-        Double threshold = ingredient.getPumpThresholdGrams() != null ? 
-            ingredient.getPumpThresholdGrams() : 10.0;
-        
-        Integer msPerGram = null;
-        if (baseGramsDefault < threshold) {
-            // Will use SMALL pump
-            msPerGram = ingredient.getMsPerGramSmall();
-            if (msPerGram == null) {
-                msPerGram = ingredient.getMsPerGramLarge(); // Fallback to Large
-            }
-        } else {
-            // Will use LARGE pump
-            msPerGram = ingredient.getMsPerGramLarge();
-        }
-        
-        // If msPerGram is not configured, fallback to default
-        if (msPerGram == null || msPerGram <= 0) {
-            return baseGramsDefault;
-        }
-        
-        // Calculate grams using configured msPerGram: grams = duration / msPerGram
-        return ri.getPulseDuration() / (double) msPerGram;
+    private double calculateBaseGramsFromDurationWithConfig(RecipeIngredient ri, Ingredient ingredient, int originalBatchSize) {
+        return computePumpResult(ri, ingredient, 1.0, originalBatchSize).grams;
     }
     
     /**
@@ -1736,7 +1790,7 @@ public class MixControlView extends VBox {
                 }
                 
                 // Calculate grams needed for original recipe batch using ingredient's msPerGram configuration
-                double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ingredient);
+                double baseGrams = calculateBaseGramsFromDurationWithConfig(ri, ingredient, originalBatchSize);
                 
                 if (baseGrams <= 0) {
                     continue; // Skip if no grams needed
