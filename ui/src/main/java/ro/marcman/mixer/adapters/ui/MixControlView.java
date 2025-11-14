@@ -5,6 +5,8 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -440,7 +442,8 @@ public class MixControlView extends VBox {
         
         logArea = new TextArea();
         logArea.setEditable(false);
-        logArea.setPrefHeight(320);
+        logArea.setPrefHeight(500);
+        logArea.setMinHeight(400);
         logArea.setStyle("-fx-control-inner-background: #000000; -fx-text-fill: #00FF00; -fx-font-family: 'Courier New'; -fx-font-size: 11px;");
         logArea.setText("=== MarcmanMixer - Mix Control Log ===\n");
         
@@ -552,6 +555,40 @@ public class MixControlView extends VBox {
             statusLabel.setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
             // Buttons will be enabled by updateStockWarning if stock is sufficient
         }
+    }
+    
+    /**
+     * Refresh all data after recipe execution (reload recipe, update stock info, recalculate max producible quantity)
+     */
+    private void refreshAfterExecution() {
+        Recipe selected = recipeCombo.getValue();
+        if (selected == null) {
+            return;
+        }
+        
+        // Reload recipe from database to get updated ingredient stock quantities
+        Recipe refreshedRecipe = recipeRepository.findById(selected.getId()).orElse(null);
+        if (refreshedRecipe != null) {
+            // Temporarily disable the action listener to avoid triggering it during refresh
+            EventHandler<ActionEvent> oldHandler = recipeCombo.getOnAction();
+            recipeCombo.setOnAction(null);
+            
+            // Update the combo box value to trigger reload
+            recipeCombo.setValue(null);
+            recipeCombo.setValue(refreshedRecipe);
+            
+            // Restore the action listener
+            recipeCombo.setOnAction(oldHandler);
+        }
+        
+        // Reload recipe data
+        loadRecipeForExecution();
+        
+        // Update calculated info and stock warnings
+        updateCalculatedInfo();
+        updateStockWarning();
+        
+        log("Data refreshed after execution - stock quantities and max producible quantity updated.");
     }
     
     private void executeRecipe() {
@@ -685,6 +722,9 @@ public class MixControlView extends VBox {
                         statusLabel.setText("Execution complete: " + selected.getName());
                         statusLabel.setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
                         progressBar.setProgress(1.0);
+                        
+                        // Refresh all data after successful execution
+                        refreshAfterExecution();
                         
                         showAlert(Alert.AlertType.INFORMATION, "Success", 
                                  String.format("Recipe '%s' executed successfully!\n\n" +
@@ -1112,6 +1152,8 @@ public class MixControlView extends VBox {
                         progressBar.setProgress(1.0);
                         statusLabel.setText("Parallel execution complete!");
                         statusLabel.setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
+                        // Refresh all data after successful execution
+                        refreshAfterExecution();
                     });
                     
                     log("\n========================================");
@@ -1192,11 +1234,13 @@ public class MixControlView extends VBox {
             }
             if (scaled == 0) continue;
 
-            // Pentru SEQUENTIAL: adună toate duratele
+            // Pentru SEQUENTIAL: adună durata totală a fiecărui ingredient
+            estimates.sequentialMs += scaled;
+            
+            // Numără segmentele pentru overhead (dacă durata depășește MAX_DURATION_PER_COMMAND)
             int remaining = scaled;
             while (remaining > 0) {
                 int chunk = Math.min(remaining, MAX_DURATION_PER_COMMAND);
-                estimates.sequentialMs += chunk;
                 remaining -= chunk;
                 segmentCount++;
             }
@@ -1207,6 +1251,7 @@ public class MixControlView extends VBox {
             }
         }
 
+        // Adaugă overhead-ul de 200ms pentru fiecare segment (pentru comenzi batch)
         if (segmentCount > 0) {
             estimates.sequentialMs += (long) segmentCount * 200L;
         }

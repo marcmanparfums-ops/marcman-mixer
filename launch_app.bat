@@ -82,7 +82,21 @@ REM Check for shaded JAR (preferred) or regular JAR
 set "SHADED_JAR=app\target\app-1.0.0-SNAPSHOT-shaded.jar"
 set "REGULAR_JAR=app\target\app-1.0.0-SNAPSHOT.jar"
 
+REM Check architecture and set os.arch property if needed
+REM This fixes jSerialComm DLL extraction on Windows when Java reports wrong architecture
+set "ARCH_ENV=%PROCESSOR_ARCHITECTURE%"
+set "ARCH_ENV64=%PROCESSOR_ARCHITEW6432%"
+set "JVM_ARCH_FIX="
+if "%ARCH_ENV%"=="AMD64" set "JVM_ARCH_FIX=-Dos.arch=amd64"
+if "%ARCH_ENV64%"=="AMD64" set "JVM_ARCH_FIX=-Dos.arch=amd64"
+
 REM Try Maven javafx:run first (best method)
+REM Pass architecture fix through MAVEN_OPTS
+if defined JVM_ARCH_FIX (
+    set "MAVEN_OPTS=%JVM_ARCH_FIX% %MAVEN_OPTS%"
+    echo Architecture fix applied: %JVM_ARCH_FIX%
+    echo.
+)
 call "%MAVEN_HOME%\bin\mvn.cmd" javafx:run -pl app 2>&1
 set EXIT_CODE=%ERRORLEVEL%
 
@@ -97,7 +111,10 @@ if %EXIT_CODE% neq 0 (
         echo Using shaded JAR with all dependencies...
         echo.
         REM Shaded JAR should have all dependencies including JavaFX
-        "%JAVA_HOME%\bin\java.exe" -jar "%SHADED_JAR%"
+        if defined JVM_ARCH_FIX (
+            echo Architecture fix applied: %JVM_ARCH_FIX%
+        )
+        "%JAVA_HOME%\bin\java.exe" %JVM_ARCH_FIX% --enable-native-access=ALL-UNNAMED --enable-preview -jar "%SHADED_JAR%"
         set EXIT_CODE=%ERRORLEVEL%
     ) else if exist "%REGULAR_JAR%" (
         echo Using regular JAR - trying with module path...
@@ -106,14 +123,17 @@ if %EXIT_CODE% neq 0 (
         REM Get Maven local repository path
         for /f "tokens=*" %%i in ('call "%MAVEN_HOME%\bin\mvn.cmd" help:evaluate -Dexpression=settings.localRepository -q -DforceStdout') do set "MAVEN_REPO=%%i"
         
-        REM Try with JavaFX from Maven repository
+        REM Try with JavaFX from Maven repository (updated to version 25.0.1)
         if defined MAVEN_REPO (
-            set "JAVAFX_PATH=!MAVEN_REPO!\org\openjfx\javafx-controls\23.0.2"
+            set "JAVAFX_PATH=!MAVEN_REPO!\org\openjfx\javafx-controls\25.0.1"
             if exist "!JAVAFX_PATH!" (
                 for /d %%d in ("!JAVAFX_PATH!\*") do (
-                    set "JAVAFX_JAR=%%d\javafx-controls-23.0.2.jar"
+                    set "JAVAFX_JAR=%%d\javafx-controls-25.0.1.jar"
                     if exist "!JAVAFX_JAR!" (
-                        "%JAVA_HOME%\bin\java.exe" --module-path "%%d" --add-modules javafx.controls,javafx.fxml -cp "%REGULAR_JAR%" ro.marcman.mixer.app.App
+                        if defined JVM_ARCH_FIX (
+                            echo Architecture fix applied: %JVM_ARCH_FIX%
+                        )
+                        "%JAVA_HOME%\bin\java.exe" %JVM_ARCH_FIX% --enable-native-access=ALL-UNNAMED --enable-preview --module-path "%%d" --add-modules javafx.controls,javafx.fxml -cp "%REGULAR_JAR%" ro.marcman.mixer.app.App
                         set EXIT_CODE=%ERRORLEVEL%
                         goto :done_alt
                     )
@@ -123,7 +143,10 @@ if %EXIT_CODE% neq 0 (
         
         REM Last resort: try without module path (will fail if JavaFX not bundled)
         echo WARNING: JavaFX modules not found, trying direct execution...
-        "%JAVA_HOME%\bin\java.exe" -cp "%REGULAR_JAR%" ro.marcman.mixer.app.App
+        if defined JVM_ARCH_FIX (
+            echo Architecture fix applied: %JVM_ARCH_FIX%
+        )
+        "%JAVA_HOME%\bin\java.exe" %JVM_ARCH_FIX% --enable-native-access=ALL-UNNAMED --enable-preview -cp "%REGULAR_JAR%" ro.marcman.mixer.app.App
         set EXIT_CODE=%ERRORLEVEL%
         
         :done_alt

@@ -51,12 +51,40 @@
                 <version>0.0.8</version>
                 <configuration>
                     <mainClass>ro.marcman.mixer.app.App</mainClass>
+                    <options>
+                        <!-- Enable native access for jSerialComm and other native libraries -->
+                        <option>--enable-native-access=ALL-UNNAMED</option>
+                        <!-- Add preview features if needed -->
+                        <option>--enable-preview</option>
+                    </options>
+                    <!-- Fix jSerialComm architecture detection on Windows -->
+                    <!-- This ensures correct DLL extraction when Java reports wrong architecture -->
+                    <systemProperties>
+                        <property>
+                            <name>os.arch</name>
+                            <value>amd64</value>
+                        </property>
+                    </systemProperties>
                 </configuration>
                 <executions>
                     <execution>
                         <id>default-cli</id>
                         <configuration>
                             <mainClass>ro.marcman.mixer.app.App</mainClass>
+                            <options>
+                                <!-- Enable native access for jSerialComm and other native libraries -->
+                                <option>--enable-native-access=ALL-UNNAMED</option>
+                                <!-- Add preview features if needed -->
+                                <option>--enable-preview</option>
+                            </options>
+                            <!-- Fix jSerialComm architecture detection on Windows -->
+                            <!-- This ensures correct DLL extraction when Java reports wrong architecture -->
+                            <systemProperties>
+                                <property>
+                                    <name>os.arch</name>
+                                    <value>amd64</value>
+                                </property>
+                            </systemProperties>
                         </configuration>
                     </execution>
                 </executions>

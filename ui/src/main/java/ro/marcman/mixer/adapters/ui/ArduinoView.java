@@ -11,12 +11,15 @@ import ro.marcman.mixer.serial.model.ArduinoCommand;
 import ro.marcman.mixer.serial.model.SerialResponse;
 import ro.marcman.mixer.adapters.ui.util.IconSupport;
 
+import java.util.List;
+
 /**
  * Procesor communication UI - Built programmatically without FXML
  */
 public class ArduinoView extends VBox {
     
-    private final SerialManager serialManager = new SerialManager();
+    // Lazy initialization to prevent jSerialComm from loading before architecture is fixed
+    private SerialManager serialManager;
     
     // UI Components
     private ComboBox<String> portComboBox;
@@ -29,6 +32,9 @@ public class ArduinoView extends VBox {
     private Button sendButton;
     private TextArea responseArea;
     private Label statusLabel;
+    private Button heartbeatButton;
+    private boolean heartbeatActive = false;
+    private Thread heartbeatThread;
     
     public ArduinoView() {
         super(10);
@@ -36,6 +42,17 @@ public class ArduinoView extends VBox {
         
         buildUI();
         setupSerialListener();
+    }
+    
+    /**
+     * Get SerialManager instance with lazy initialization.
+     * This ensures jSerialComm classes are only loaded after architecture is fixed.
+     */
+    public SerialManager getSerialManager() {
+        if (serialManager == null) {
+            serialManager = new SerialManager();
+        }
+        return serialManager;
     }
     
     private void buildUI() {
@@ -85,8 +102,16 @@ public class ArduinoView extends VBox {
         scanButton = new Button("Scan Network");
         scanButton.setOnAction(e -> handleScan());
         
+        Separator separator2 = new Separator();
+        separator2.setOrientation(javafx.geometry.Orientation.VERTICAL);
+        
+        heartbeatButton = new Button("LIVE OFF");
+        heartbeatButton.setStyle("-fx-background-color: #9E9E9E; -fx-text-fill: white; -fx-font-weight: bold;");
+        heartbeatButton.setOnAction(e -> toggleHeartbeat());
+        heartbeatButton.setDisable(true);
+        
         buttonRow.getChildren().addAll(connectButton, disconnectButton, separator, 
-                                       discoverButton, scanButton);
+                                       discoverButton, scanButton, separator2, heartbeatButton);
         
         // Status label
         statusLabel = new Label("Not connected");
@@ -110,6 +135,8 @@ public class ArduinoView extends VBox {
         responseArea = new TextArea();
         responseArea.setEditable(false);
         responseArea.setWrapText(true);
+        responseArea.setPrefHeight(500);
+        responseArea.setMinHeight(400);
         responseArea.setStyle("-fx-font-family: 'Courier New'; -fx-font-size: 12px; " +
                              "-fx-control-inner-background: #263238; -fx-text-fill: #00FF00;");
         VBox.setVgrow(responseArea, Priority.ALWAYS);
@@ -147,12 +174,21 @@ public class ArduinoView extends VBox {
         // Add all to main container
         getChildren().addAll(titleLabel, connectionPane, commandPane);
         
-        // Initial port refresh
-        handleRefresh();
+        // Initial port refresh - delay to allow jSerialComm cache cleanup to complete
+        // Use Platform.runLater to ensure it runs after App.start() cleanup finishes
+        Platform.runLater(() -> {
+            try {
+                // Additional small delay to ensure cleanup is complete
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            handleRefresh();
+        });
     }
     
     private void setupSerialListener() {
-        serialManager.addListener(new SerialListener() {
+        getSerialManager().addListener(new SerialListener() {
             @Override
             public void onDataReceived(SerialResponse response) {
                 Platform.runLater(() -> {
@@ -189,20 +225,27 @@ public class ArduinoView extends VBox {
                     connectButton.setDisable(true);
                     disconnectButton.setDisable(false);
                     sendButton.setDisable(false);
+                    heartbeatButton.setDisable(false);
                     portComboBox.setDisable(true);
                     
                     responseArea.appendText("=== Connected to " + portName + " at 115200 baud ===\n");
-                    serialManager.sendCommand(ArduinoCommand.help());
+                    getSerialManager().sendCommand(ArduinoCommand.help());
                 });
             }
             
             @Override
             public void onDisconnected() {
                 Platform.runLater(() -> {
+                    // Stop heartbeat if active
+                    if (heartbeatActive) {
+                        stopHeartbeat();
+                    }
+                    
                     updateStatus("Disconnected", "warning");
                     connectButton.setDisable(false);
                     disconnectButton.setDisable(true);
                     sendButton.setDisable(true);
+                    heartbeatButton.setDisable(true);
                     portComboBox.setDisable(false);
                 });
             }
@@ -214,7 +257,7 @@ public class ArduinoView extends VBox {
         
         if (selectedPort == null || selectedPort.isEmpty()) {
             updateStatus("Auto-detecting Procesor...", "info");
-            if (!serialManager.connectAuto()) {
+            if (!getSerialManager().connectAuto()) {
                 updateStatus("Failed to auto-detect Procesor", "error");
                 showAlert(Alert.AlertType.ERROR, "Connection Failed", 
                          "Could not auto-detect Procesor Mega. Please select a port manually.");
@@ -223,7 +266,7 @@ public class ArduinoView extends VBox {
             String portName = selectedPort.split(" - ")[0];
             updateStatus("Connecting to " + portName + "...", "info");
             
-            if (!serialManager.connect(portName)) {
+            if (!getSerialManager().connect(portName)) {
                 updateStatus("Failed to connect", "error");
                 showAlert(Alert.AlertType.ERROR, "Connection Failed", 
                          "Could not connect to " + portName);
@@ -232,7 +275,7 @@ public class ArduinoView extends VBox {
     }
     
     private void handleDisconnect() {
-        serialManager.disconnect();
+        getSerialManager().disconnect();
     }
     
     /**
@@ -241,8 +284,14 @@ public class ArduinoView extends VBox {
      */
     public void cleanup() {
         System.out.println("ArduinoView cleanup - disconnecting serial port...");
+        
+        // Stop heartbeat if active
+        if (heartbeatActive) {
+            stopHeartbeat();
+        }
+        
         if (serialManager.isConnected()) {
-            serialManager.disconnect();
+            getSerialManager().disconnect();
             try {
                 // Wait a bit to ensure port is released
                 Thread.sleep(200);
@@ -254,19 +303,27 @@ public class ArduinoView extends VBox {
     }
     
     private void handleRefresh() {
-        portComboBox.getItems().clear();
-        portComboBox.getItems().addAll(serialManager.getAvailablePorts());
-        
-        if (!portComboBox.getItems().isEmpty()) {
-            portComboBox.setValue(portComboBox.getItems().get(0));
+        try {
+            portComboBox.getItems().clear();
+            List<String> ports = getSerialManager().getAvailablePorts();
+            portComboBox.getItems().addAll(ports);
+            
+            if (!portComboBox.getItems().isEmpty()) {
+                portComboBox.setValue(portComboBox.getItems().get(0));
+                updateStatus(portComboBox.getItems().size() + " ports found", "info");
+            } else {
+                updateStatus("No ports available - jSerialComm may not be initialized. Check console for details.", "warning");
+            }
+        } catch (Exception e) {
+            updateStatus("Error refreshing ports: " + e.getMessage(), "error");
+            System.err.println("Error in handleRefresh: " + e.getMessage());
+            e.printStackTrace();
         }
-        
-        updateStatus(portComboBox.getItems().size() + " ports found", "info");
     }
     
     private void handleDiscover() {
-        if (serialManager.isConnected()) {
-            serialManager.sendCommand(ArduinoCommand.discover());
+        if (getSerialManager().isConnected()) {
+            getSerialManager().sendCommand(ArduinoCommand.discover());
         } else {
             showAlert(Alert.AlertType.WARNING, "Not Connected", 
                      "Please connect to Arduino first.");
@@ -274,8 +331,8 @@ public class ArduinoView extends VBox {
     }
     
     private void handleScan() {
-        if (serialManager.isConnected()) {
-            serialManager.sendCommand(ArduinoCommand.scan());
+        if (getSerialManager().isConnected()) {
+            getSerialManager().sendCommand(ArduinoCommand.scan());
         } else {
             showAlert(Alert.AlertType.WARNING, "Not Connected", 
                      "Please connect to Arduino first.");
@@ -289,26 +346,26 @@ public class ArduinoView extends VBox {
             return;
         }
         
-        if (!serialManager.isConnected()) {
+        if (!getSerialManager().isConnected()) {
             showAlert(Alert.AlertType.WARNING, "Not Connected", 
                      "Please connect to Arduino first.");
             return;
         }
         
         responseArea.appendText("> " + command + "\n");
-        serialManager.sendRawCommand(command);
+        getSerialManager().sendRawCommand(command);
         commandField.clear();
     }
     
     private void sendQuickCommand(String command) {
-        if (!serialManager.isConnected()) {
+        if (!getSerialManager().isConnected()) {
             showAlert(Alert.AlertType.WARNING, "Not Connected", 
                      "Please connect to Arduino first.");
             return;
         }
         
         responseArea.appendText("> " + command + "\n");
-        serialManager.sendRawCommand(command);
+        getSerialManager().sendRawCommand(command);
     }
     
     private void updateStatus(String message, String type) {
@@ -364,8 +421,90 @@ public class ArduinoView extends VBox {
         alert.showAndWait();
     }
     
-    public SerialManager getSerialManager() {
-        return serialManager;
+    /**
+     * Toggle heartbeat (LIVE) on pin 47
+     */
+    private void toggleHeartbeat() {
+        if (heartbeatActive) {
+            stopHeartbeat();
+        } else {
+            startHeartbeat();
+        }
     }
+    
+    /**
+     * Start heartbeat thread - sends periodic pulse on pin 47
+     */
+    private void startHeartbeat() {
+        if (!getSerialManager().isConnected()) {
+            showAlert(Alert.AlertType.WARNING, "Not Connected", 
+                     "Please connect to Arduino first.");
+            return;
+        }
+        
+        heartbeatActive = true;
+        Platform.runLater(() -> {
+            heartbeatButton.setText("LIVE ON");
+            heartbeatButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-weight: bold;");
+        });
+        
+        responseArea.appendText("> LIVE heartbeat started on pin 47\n");
+        
+        // Start heartbeat thread
+        heartbeatThread = new Thread(() -> {
+            try {
+                while (heartbeatActive && getSerialManager().isConnected()) {
+                    // Send pulse: set pin 47 HIGH, wait, then LOW
+                    getSerialManager().sendRawCommand("set 47 1");
+                    Thread.sleep(100); // Keep HIGH for 100ms
+                    getSerialManager().sendRawCommand("set 47 0");
+                    
+                    // Wait 1 second before next heartbeat
+                    Thread.sleep(1000);
+                }
+            } catch (InterruptedException e) {
+                // Thread interrupted, stop heartbeat
+                heartbeatActive = false;
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    responseArea.appendText("ERROR: Heartbeat failed: " + e.getMessage() + "\n");
+                });
+                heartbeatActive = false;
+            }
+            
+            // Update button when thread stops
+            Platform.runLater(() -> {
+                heartbeatButton.setText("LIVE OFF");
+                heartbeatButton.setStyle("-fx-background-color: #9E9E9E; -fx-text-fill: white; -fx-font-weight: bold;");
+            });
+        });
+        
+        heartbeatThread.setDaemon(true);
+        heartbeatThread.start();
+    }
+    
+    /**
+     * Stop heartbeat thread
+     */
+    private void stopHeartbeat() {
+        heartbeatActive = false;
+        
+        if (heartbeatThread != null && heartbeatThread.isAlive()) {
+            heartbeatThread.interrupt();
+        }
+        
+        // Turn off pin 47
+        if (getSerialManager().isConnected()) {
+            getSerialManager().sendRawCommand("set 47 0");
+        }
+        
+        Platform.runLater(() -> {
+            heartbeatButton.setText("LIVE OFF");
+            heartbeatButton.setStyle("-fx-background-color: #9E9E9E; -fx-text-fill: white; -fx-font-weight: bold;");
+        });
+        
+        responseArea.appendText("> LIVE heartbeat stopped\n");
+    }
+    
 }
 
